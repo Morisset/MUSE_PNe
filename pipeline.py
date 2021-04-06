@@ -83,10 +83,13 @@ for lam_str in l_dic:
     err_fits_data = err_fits_hdu.data
     
     line = pn.EmissionLine(l_dic[lam_str][0], l_dic[lam_str][1], l_dic[lam_str][2], 
-                           obsIntens=fits_data.ravel(), 
-                           obsError=err_fits_data.ravel(), corrected=True)
+                           obsIntens=fits_data.ravel()[10000:10010], 
+                           obsError=err_fits_data.ravel()[10000:10010], corrected=True)
     obs.addLine(line)
+obs.names = ['N{}N'.format(i) for i in range(obs.n_obs)]
 wcs = WCS(fits_hdu.header).celestial
+#%%
+obs.addMonteCarloObs(5)
 #%% 
 diags = pn.Diagnostics()
 diags.ANN_inst_kwargs['verbose']=True
@@ -97,7 +100,7 @@ Te, Ne = diags.getCrossTemDen('[NII] 5755/6584', '[SII] 6731/6716', obs=obs)
 pn.log_.timer('Paralelized getCrossTemDen done')
 #%%
 pn.log_.timer('Starting', quiet=True)
-pn.config.verbose=2
+pn.config.level=1
 Te_ANN, Ne_ANN = diags.getCrossTemDen('[NII] 5755/6584', '[SII] 6731/6716', obs=obs, use_ANN=True)
 pn.log_.timer('ANN getCrossTemDen done')
 
