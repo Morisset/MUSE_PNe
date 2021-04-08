@@ -18,6 +18,11 @@ from astropy.wcs import WCS
 from scipy.ndimage import gaussian_filter
 from pathlib import Path
 import h5py
+try:
+    from ai4neb import manage_RM
+    AI4NEB_INSTALLED = True
+except:
+    AI4NEB_INSTALLED = False
 
 #%%
 l_dic = {'4641.0': ('N', 2, '4641A', 1),
@@ -87,6 +92,7 @@ class PipeLine(object):
         self.name = name
         self.MC_done = False
         self.N_MC = None
+        self.TeNe = {}
         
         self.load_obs()
         """
@@ -144,36 +150,47 @@ class PipeLine(object):
         else:
             if type_ == 'median':
                 return np.nanmedian(d2return.reshape(self.shape_data), 2)
+            if type_ == 'mean':
+                return np.nanmean(d2return.reshape(self.shape_data), 2)
             elif type_ == 'std':
                 return np.nanstd(d2return.reshape(self.shape_data), 2)
             elif type_ == 'orig':
                 return d2return.reshape(self.shape_data)[:,:,0]
             else:
-                self.log_.error('type_ must be one of median, std, orig')
+                self.log_.error('type_ must be one of median, mean, std, or orig')
         
-    def red_cor_obs(self, plot_=True, label1="H1r_6563A", label2="H1r_4861A", r_theo=2.85):
+    def red_cor_obs(self, plot_=True, label1="H1r_6563A", label2="H1r_4861A", r_theo=2.85,
+                    **kwargs):
         
         self.obs.def_EBV(label1=label1, label2=label2, r_theo=r_theo)
         self.obs.correctData()
         if plot_:
-            c_Hbeta = self.get_image(self.obs.extinction.cHbeta)
-            f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
-            im = ax.imshow(c_Hbeta, vmin=0.5, vmax=.8)
-            cb = f.colorbar(im, ax=ax)
-            ax.set_title('cHbeta');    
-    
-    def plot(self, ax=None, data=None, label=None, type_='median', **kwargs):
+            self.plot(data=self.obs.extinction.cHbeta, **kwargs)
+
+    def plot(self, ax=None, data=None, label=None, image=None, type_='median', 
+             title=None, **kwargs):
         
         if ax is None:
             f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
         else:
             f = plt.gcf()
-        im=ax.imshow(self.get_image(data=data, label=label, type_=type_), **kwargs)
+        if image is None:
+            this_image = self.get_image(data=data, label=label, type_=type_)
+        else:
+            this_image = image
+        im=ax.imshow(this_image, **kwargs)
         cb = f.colorbar(im, ax=ax)
-        ax.set_title('{}'.format(label))  
+        if title is None:
+            if isinstance(label, tuple):
+                this_title = '{} / {} ({})'.format(label[0], label[1], type_)
+            else:
+                this_title = '{} ({})'.format(label, type_)
+        else:
+            this_title = title
+        ax.set_title(this_title)  
         
         
-    def plot_SN(self, ax=None, data=None, label=None, **kwargs ):
+    def plot_SN(self, ax=None, data=None, label=None, title=None, **kwargs ):
 
         if ax is None:
             f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
@@ -181,11 +198,37 @@ class PipeLine(object):
             f = plt.gcf()
         med = self.get_image(data=data, label=label, type_='median')
         std = self.get_image(data=data, label=label, type_='std')
-        im=ax.imshow(med / std, **kwargs)
+        with np.errstate(divide='ignore'):
+            im=ax.imshow(med / std, **kwargs)
         cb = f.colorbar(im, ax=ax)
-        ax.set_title('S/N {}'.format(label))  
+        if title is None:
+            this_title = 'S/N {}'.format(label)
+        else:
+            this_title = title
+        ax.set_title(this_title)  
+        
+    def make_diags(self, use_ANN=True):
+        
+        self.diags = pn.Diagnostics()
+        self.diags.ANN_inst_kwargs['verbose']=True
+        self.diags.addDiagsFromObs(self.obs)       
         
         
+    def add_gCTD(self, label, d1, d2, use_ANN=True, limit_res=True, **kwargs):
+        
+        if AI4NEB_INSTALLED:
+            ANN = manage_RM(RM_filename=label)
+        else:
+            if use_ANN:
+                pn.log_.error('ai4neb not installed')
+        if not ANN.model_read:
+            ANN = None
+        Te, Ne = self.diags.getCrossTemDen(d1, d2, obs=self.obs, use_ANN=use_ANN, ANN=ANN,
+                                           limit_res=limit_res, **kwargs)
+        if use_ANN and ANN is None:
+            self.diags.ANN.save_RM(filename=label, save_train=True, save_test=True)
+        self.TeNe[label] = {'Te': Te, 'Ne': Ne}
+    
         
 #%%
 
