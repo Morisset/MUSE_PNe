@@ -214,18 +214,19 @@ class PipeLine(object):
         self.diags.addDiagsFromObs(self.obs)       
         
         
-    def add_gCTD(self, label, d1, d2, use_ANN=True, limit_res=True, **kwargs):
+    def add_gCTD(self, label, d1, d2, use_ANN=True, limit_res=True, force=False, save=True, **kwargs):
         
-        if AI4NEB_INSTALLED:
-            ANN = manage_RM(RM_filename=label)
+        if not AI4NEB_INSTALLED and use_ANN:
+            pn.log_.error('ai4neb not installed')
+        if force:
+            ANN = None        
         else:
-            if use_ANN:
-                pn.log_.error('ai4neb not installed')
-        if not ANN.model_read:
-            ANN = None
+            ANN = manage_RM(RM_filename=label)        
+            if not ANN.model_read:
+                ANN = None
         Te, Ne = self.diags.getCrossTemDen(d1, d2, obs=self.obs, use_ANN=use_ANN, ANN=ANN,
                                            limit_res=limit_res, **kwargs)
-        if use_ANN and ANN is None:
+        if use_ANN and ANN is None and save:
             self.diags.ANN.save_RM(filename=label, save_train=True, save_test=True)
         self.TeNe[label] = {'Te': Te, 'Ne': Ne}
     
