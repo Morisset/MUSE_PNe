@@ -10,14 +10,10 @@ Created on Tue Apr  6 09:49:26 2021
 import numpy as np
 import matplotlib.pyplot as plt
 import pyneb as pn
-from pyneb import config, log_, atomicData
-from pyneb.utils.misc import parseAtom
 pn.config.use_multiprocs()
 from astropy.io import fits
 from astropy.wcs import WCS
-from scipy.ndimage import gaussian_filter
 from pathlib import Path
-import h5py
 try:
     from ai4neb import manage_RM
     AI4NEB_INSTALLED = True
@@ -86,7 +82,7 @@ class PipeLine(object):
         None.
 
         """
-        self.log_ = log_
+        self.log_ = pn.log_
         
         self.data_dir = data_dir
         self.name = name
@@ -159,16 +155,38 @@ class PipeLine(object):
             else:
                 self.log_.error('type_ must be one of median, mean, std, or orig')
         
-    def red_cor_obs(self, plot_=True, label1="H1r_6563A", label2="H1r_4861A", r_theo=2.85,
+    def red_cor_obs(self, EBV_min=None, plot_=True, label1="H1r_6563A", label2="H1r_4861A", r_theo=2.85,
                     **kwargs):
         
         self.obs.def_EBV(label1=label1, label2=label2, r_theo=r_theo)
+        if EBV_min is not None:
+            mask = self.obs.extinction.E_BV < EBV_min
+            pn.log_.message('number of spaxels with EBV < {} : {}'.format(EBV_min, mask.sum()),
+                            calling='PipeLine.red_cor_obs')
+            self.obs.extinction.E_BV[mask] = 0.
         self.obs.correctData()
         if plot_:
             self.plot(data=self.obs.extinction.cHbeta, **kwargs)
 
+    def get_mask_SN(self, label, SN_cut):
+        """
+        Return a mask True where 1./error[label] < SN_cut
+        """
+        if isinstance(label, tuple):
+            mask = np.zeros_like(self.get_image(data = 1./self.obs.getError()[label[0]], type_='orig'), dtype=bool)
+            for i, label1 in enumerate(label):
+                if isinstance(SN_cut, tuple):
+                    SN_cut1 = SN_cut[i]
+                else:
+                    SN_cut1 = SN_cut
+                mask = mask | self.get_mask_SN(label1, SN_cut1)
+        else:
+            mask = self.get_image(data = 1./self.obs.getError()[label], type_='orig') < SN_cut
+        
+        return mask
+
     def plot(self, ax=None, data=None, label=None, image=None, type_='median', 
-             title=None, **kwargs):
+             title=None, label_cut=None, SN_cut=None, **kwargs):
         
         if ax is None:
             f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
@@ -178,6 +196,10 @@ class PipeLine(object):
             this_image = self.get_image(data=data, label=label, type_=type_)
         else:
             this_image = image
+        if SN_cut is not None:
+            if label_cut is None:
+                label_cut = label
+            this_image[self.get_mask_SN(label_cut, SN_cut)] = np.nan
         im=ax.imshow(this_image, **kwargs)
         cb = f.colorbar(im, ax=ax)
         if title is None:
@@ -217,7 +239,7 @@ class PipeLine(object):
     def add_gCTD(self, label, d1, d2, use_ANN=True, limit_res=True, force=False, save=True, **kwargs):
         
         if not AI4NEB_INSTALLED and use_ANN:
-            pn.log_.error('ai4neb not installed')
+            self.log_.error('ai4neb not installed')
         if force:
             ANN = None        
         else:
