@@ -133,12 +133,12 @@ class PipeLine(object):
                 self.N_MC = N_MC
                 self.n_obs = self.obs.n_obs
         
-    def get_image(self, data=None, label=None, type_='median'):
+    def get_image(self, data=None, label=None, type_='median', returnObs=False):
         
         if label is not None:
             if isinstance(label, tuple):
                 return self.get_image(label=label[0], type_=type_) / self.get_image(label=label[1], type_=type_)
-            d2return = self.obs.getIntens()[label]
+            d2return = self.obs.getIntens(returnObs=returnObs)[label]
         else:
             d2return = data
         if self.N_MC is None:
@@ -186,21 +186,26 @@ class PipeLine(object):
         return mask
 
     def plot(self, ax=None, data=None, label=None, image=None, type_='median', 
-             title=None, label_cut=None, SN_cut=None, **kwargs):
+             title=None, label_cut=None, SN_cut=None, use_log=False, returnObs=False, 
+             interpolation='none', **kwargs):
         
         if ax is None:
             f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
         else:
             f = plt.gcf()
         if image is None:
-            this_image = self.get_image(data=data, label=label, type_=type_)
+            this_image = self.get_image(data=data, label=label, type_=type_, 
+                                        returnObs=returnObs)
         else:
             this_image = image
         if SN_cut is not None:
             if label_cut is None:
                 label_cut = label
             this_image[self.get_mask_SN(label_cut, SN_cut)] = np.nan
-        im=ax.imshow(this_image, **kwargs)
+        if use_log:
+            with np.errstate(divide='ignore'):
+                this_image = np.log10(this_image)
+        im=ax.imshow(this_image, interpolation=interpolation, **kwargs)
         cb = f.colorbar(im, ax=ax)
         if title is None:
             if isinstance(label, tuple):
@@ -221,10 +226,36 @@ class PipeLine(object):
         med = self.get_image(data=data, label=label, type_='median')
         std = self.get_image(data=data, label=label, type_='std')
         with np.errstate(divide='ignore'):
-            im=ax.imshow(med / std, **kwargs)
+            this_image = med / std
+        im=ax.imshow(this_image, **kwargs)
         cb = f.colorbar(im, ax=ax)
         if title is None:
             this_title = 'S/N {}'.format(label)
+        else:
+            this_title = title
+        ax.set_title(this_title)  
+        
+    def plot_STD(self, ax=None, data=None, label=None, title=None, norm=True, **kwargs ):
+
+        if ax is None:
+            f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
+        else:
+            f = plt.gcf()
+        med = self.get_image(data=data, label=label, type_='median')
+        std = self.get_image(data=data, label=label, type_='std')
+        with np.errstate(divide='ignore'):
+            if norm:
+                this_image = std / med * 100
+            else:
+                this_image = std
+        im=ax.imshow(this_image, **kwargs)
+        cb = f.colorbar(im, ax=ax)
+        if title is None:
+            if norm:
+                norm_str = '[%]'
+            else:
+                norm_str = ''
+            this_title = 'STD {} {}'.format(label, norm_str)
         else:
             this_title = title
         ax.set_title(this_title)  
@@ -236,7 +267,7 @@ class PipeLine(object):
         self.diags.addDiagsFromObs(self.obs)       
         
         
-    def add_gCTD(self, label, d1, d2, use_ANN=True, limit_res=True, force=False, save=True, **kwargs):
+    def add_gCTD(self, label, diag1, diag2, use_ANN=True, limit_res=True, force=False, save=True, **kwargs):
         
         if not AI4NEB_INSTALLED and use_ANN:
             self.log_.error('ai4neb not installed')
@@ -246,13 +277,16 @@ class PipeLine(object):
             ANN = manage_RM(RM_filename=label)        
             if not ANN.model_read:
                 ANN = None
-        Te, Ne = self.diags.getCrossTemDen(d1, d2, obs=self.obs, use_ANN=use_ANN, ANN=ANN,
+        Te, Ne = self.diags.getCrossTemDen(diag1, diag2, obs=self.obs, use_ANN=use_ANN, ANN=ANN,
                                            limit_res=limit_res, **kwargs)
         if use_ANN and ANN is None and save:
             self.diags.ANN.save_RM(filename=label, save_train=True, save_test=True)
         self.TeNe[label] = {'Te': Te, 'Ne': Ne}
     
-        
+    def add_T_He(self):
+        """
+        Zhang 2005
+        """
 #%%
 
 
