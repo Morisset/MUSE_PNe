@@ -73,7 +73,8 @@ class PipeLine(object):
     
     def __init__(self, 
                  data_dir=data_dir, 
-                 name = 'ngc6778'):
+                 name = 'ngc6778_MUSE_',
+                 error_str='_error'):
         """
 
 
@@ -86,6 +87,7 @@ class PipeLine(object):
         
         self.data_dir = data_dir
         self.name = name
+        self.error_str = error_str
         self.MC_done = False
         self.N_MC = None
         self.TeNe = {}
@@ -101,10 +103,10 @@ class PipeLine(object):
         self.obs = pn.Observation(corrected = False)
         for lam_str in l_dic:
             l = l_dic[lam_str]
-            data_file = self.data_dir / Path('{}_MUSE_{}.fits'.format(self.name, lam_str))
+            data_file = self.data_dir / Path('{}{}.fits'.format(self.name, lam_str))
             fits_hdu = fits.open(data_file)[0]
             fits_data = fits_hdu.data
-            err_data_file = data_dir / Path('{}_MUSE_{}_error.fits'.format(self.name, lam_str))
+            err_data_file = data_dir / Path('{}{}{}.fits'.format(self.name, lam_str, self.error_str))
             err_fits_hdu = fits.open(err_data_file)[0]
             err_fits_data = err_fits_hdu.data
             if l[3] == 1:
