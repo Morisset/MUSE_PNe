@@ -67,7 +67,7 @@ l_dic = {'4641.0': ('N', 2, '4641A', 1),
          '9071.0' : ('S', 3, '9069A', 0),
          '9229.0' : ('H', 1, '9229A', 1)
          }
-data_dir = Path('/Users/christophemorisset/DATA/MUSE_Jorge/hektor_fits/ngc6778_maps/ngc6778_long_maps')
+data_dir = Path('/Users/pepe/Dropbox/MUSE_data/hektor_fits/ngc6778_maps/ngc6778_long_maps')
 #%%
 class PipeLine(object):
     
@@ -106,7 +106,7 @@ class PipeLine(object):
             data_file = self.data_dir / Path('{}{}.fits'.format(self.name, lam_str))
             fits_hdu = fits.open(data_file)[0]
             fits_data = fits_hdu.data
-            err_data_file = data_dir / Path('{}{}{}.fits'.format(self.name, lam_str, self.error_str))
+            err_data_file = self.data_dir / Path('{}{}{}.fits'.format(self.name, lam_str, self.error_str))
             err_fits_hdu = fits.open(err_data_file)[0]
             err_fits_data = err_fits_hdu.data
             if l[3] == 1:
@@ -189,7 +189,7 @@ class PipeLine(object):
 
     def plot(self, ax=None, data=None, label=None, image=None, type_='median', 
              title=None, label_cut=None, SN_cut=None, use_log=False, returnObs=False, 
-             interpolation='none', **kwargs):
+             interpolation='none', cb_title=None,  **kwargs):
         
         if ax is None:
             f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
@@ -209,6 +209,8 @@ class PipeLine(object):
                 this_image = np.log10(this_image)
         im=ax.imshow(this_image, interpolation=interpolation, **kwargs)
         cb = f.colorbar(im, ax=ax)
+        cb.ax.get_yaxis().labelpad = 20
+        cb.ax.set_ylabel(cb_title, rotation=270)
         if title is None:
             if isinstance(label, tuple):
                 this_title = '{} / {} ({})'.format(label[0], label[1], type_)
