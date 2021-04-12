@@ -67,13 +67,12 @@ l_dic = {'4641.0': ('N', 2, '4641A', 1),
          '9071.0' : ('S', 3, '9069A', 0),
          '9229.0' : ('H', 1, '9229A', 1)
          }
-data_dir = Path('/Users/pepe/Dropbox/MUSE_data/hektor_fits/ngc6778_maps/ngc6778_long_maps')
 #%%
 class PipeLine(object):
     
     def __init__(self, 
-                 data_dir=data_dir, 
-                 name = 'ngc6778_MUSE_',
+                 data_dir, 
+                 name,
                  error_str='_error'):
         """
 
