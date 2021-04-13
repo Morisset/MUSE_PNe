@@ -67,6 +67,39 @@ l_dic = {'4641.0': ('N', 2, '4641A', 1),
          '9071.0' : ('S', 3, '9069A', 0),
          '9229.0' : ('H', 1, '9229A', 1)
          }
+
+#%%
+
+def rename_files(data_dir, name, err_dir1, err_dir2):
+    
+    """
+    rename_files(data_dir = '/Users/christophemorisset/DATA/MUSE_Jorge/hektor_fits/ngc6778_maps/ngc6778_long_maps/', 
+                 name = 'ngc6778_MUSE_')
+    """
+    
+    for lam_str in l_dic:
+        l = l_dic[lam_str]
+        data_file = data_dir / Path('{}{}.fits'.format(name, lam_str))
+        new_data_file = data_dir / Path('{}{}{}_{}.fits'.format(name, l[0], l[1], l[2]))
+        err_data_file1 = data_dir / Path('{}{}_error.fits'.format(name, lam_str))
+        new_edata_file1 = data_dir / Path(err_dir1) / Path('{}{}{}_{}_err.fits'.format(name, l[0], l[1], l[2]))
+        err_data_file2 = data_dir / Path('{}{}_error_alfalike.fits'.format(name, lam_str))
+        new_edata_file2 = data_dir / Path(err_dir2) / Path('{}{}{}_{}_err.fits'.format(name, l[0], l[1], l[2]))
+        if data_file.exists():
+            print(data_file, '->', new_data_file)
+            data_file.rename(new_data_file)
+        if err_data_file1.exists():
+            print(err_data_file1, '->', new_edata_file1)
+            err_data_file1.rename(new_edata_file1)
+        if err_data_file2.exists():
+            print(err_data_file2, '->', new_edata_file2)
+            err_data_file2.rename(new_edata_file2)
+
+
+rename_files(data_dir = '/Users/christophemorisset/DATA/MUSE_Jorge/hektor_fits/ngc6778_maps/ngc6778_long_maps/', 
+             name = 'ngc6778_MUSE_', err_dir1 = 'error', err_dir2 = 'error_alfalike')
+
+
 #%%
 class PipeLine(object):
     
