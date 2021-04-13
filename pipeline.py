@@ -68,9 +68,10 @@ l_dic = {'4641.0': ('N', 2, '4641A', 1),
          '9229.0' : ('H', 1, '9229A', 1)
          }
 
+
 #%%
 
-def rename_files(data_dir, name, err_dir1, err_dir2):
+def rename_files(data_dir, name):
     
     """
     rename_files(data_dir = '/Users/christophemorisset/DATA/MUSE_Jorge/hektor_fits/ngc6778_maps/ngc6778_long_maps/', 
@@ -79,12 +80,16 @@ def rename_files(data_dir, name, err_dir1, err_dir2):
     
     for lam_str in l_dic:
         l = l_dic[lam_str]
+        if l[3] == 1:
+            rec_str = 'r'
+        else:
+            rec_str = ''
         data_file = data_dir / Path('{}{}.fits'.format(name, lam_str))
-        new_data_file = data_dir / Path('{}{}{}_{}.fits'.format(name, l[0], l[1], l[2]))
+        new_data_file = data_dir / Path('{}{}{}{}_{}.fits'.format(name, l[0], l[1], rec_str, l[2]))
         err_data_file1 = data_dir / Path('{}{}_error.fits'.format(name, lam_str))
-        new_edata_file1 = data_dir / Path(err_dir1) / Path('{}{}{}_{}_err.fits'.format(name, l[0], l[1], l[2]))
+        new_edata_file1 = data_dir / Path('{}{}{}{}_{}_error.fits'.format(name, l[0], l[1], rec_str, l[2]))
         err_data_file2 = data_dir / Path('{}{}_error_alfalike.fits'.format(name, lam_str))
-        new_edata_file2 = data_dir / Path(err_dir2) / Path('{}{}{}_{}_err.fits'.format(name, l[0], l[1], l[2]))
+        new_edata_file2 = data_dir / Path('{}{}{}{}_{}_error_alfalike.fits'.format(name, l[0], l[1], rec_str, l[2]))
         if data_file.exists():
             print(data_file, '->', new_data_file)
             data_file.rename(new_data_file)
@@ -94,11 +99,6 @@ def rename_files(data_dir, name, err_dir1, err_dir2):
         if err_data_file2.exists():
             print(err_data_file2, '->', new_edata_file2)
             err_data_file2.rename(new_edata_file2)
-
-
-rename_files(data_dir = '/Users/christophemorisset/DATA/MUSE_Jorge/hektor_fits/ngc6778_maps/ngc6778_long_maps/', 
-             name = 'ngc6778_MUSE_', err_dir1 = 'error', err_dir2 = 'error_alfalike')
-
 
 #%%
 class PipeLine(object):
@@ -130,7 +130,7 @@ class PipeLine(object):
         self.red_cor_obs()
         """
         
-    def load_obs(self):
+    def load_obs_deprecated(self):
         
         self.obs = pn.Observation(corrected = False)
         for lam_str in l_dic:
@@ -146,25 +146,33 @@ class PipeLine(object):
             else:
                 perm = ''
             label='{}{}{}_{}'.format(l[0], l[1], perm, l[2])
-            line = pn.EmissionLine( label=label,
+            line = pn.EmissionLine(label=label,
                                    obsIntens=fits_data.ravel(), 
                                    obsError=err_fits_data.ravel(), 
                                    corrected=False, errIsRelative=False)
             self.obs.addLine(line)
         self.wcs = WCS(fits_hdu.header).celestial
-        self.shape_data = fits_data.shape
+        self.data_shape = fits_data.shape
         self.n_obs = self.obs.n_obs
         self.obs.names = ['N{}N'.format(i) for i in range(self.n_obs)]
         self.n_lines = self.obs.n_lines
+        
+    def load_obs(self):
+        
+        obs_name = Path(self.data_dir) / Path(self.name)
+        self.obs = pn.Observation(obs_name, fileFormat='fits_IFU', 
+                                  corrected = False, 
+                                  errStr=self.error_str, 
+                                  errIsRelative=False)
+        self.n_obs = self.obs.n_obs
 
     def add_MC(self, N_MC=None):
         
         if not self.MC_done:
             if N_MC is not None:
                 self.obs.addMonteCarloObs(N_MC)
-                self.shape_data = (self.shape_data[0], self.shape_data[1], N_MC+1)
                 self.MC_done = True
-                self.N_MC = N_MC
+                self.N_MC = self.obs.N_MC
                 self.n_obs = self.obs.n_obs
         
     def get_image(self, data=None, label=None, type_='median', returnObs=False):
@@ -176,16 +184,16 @@ class PipeLine(object):
         else:
             d2return = data
         if self.N_MC is None:
-            return d2return.reshape(self.shape_data)
+            return d2return.reshape(self.obs.data_shape)
         else:
             if type_ == 'median':
-                return np.nanmedian(d2return.reshape(self.shape_data), 2)
+                return np.nanmedian(d2return.reshape(self.obs.data_shape), 2)
             if type_ == 'mean':
-                return np.nanmean(d2return.reshape(self.shape_data), 2)
+                return np.nanmean(d2return.reshape(self.obs.data_shape), 2)
             elif type_ == 'std':
-                return np.nanstd(d2return.reshape(self.shape_data), 2)
+                return np.nanstd(d2return.reshape(self.obs.data_shape), 2)
             elif type_ == 'orig':
-                return d2return.reshape(self.shape_data)[:,:,0]
+                return d2return.reshape(self.obs.data_shape)[:,:,0]
             else:
                 self.log_.error('type_ must be one of median, mean, std, or orig')
         
@@ -224,7 +232,7 @@ class PipeLine(object):
              interpolation='none', cb_title=None,  **kwargs):
         
         if ax is None:
-            f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
+            f, ax = plt.subplots(subplot_kw={'projection': self.obs.wcs}, figsize=(8,8))
         else:
             f = plt.gcf()
         if image is None:
@@ -256,7 +264,7 @@ class PipeLine(object):
     def plot_SN(self, ax=None, data=None, label=None, title=None, **kwargs ):
 
         if ax is None:
-            f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
+            f, ax = plt.subplots(subplot_kw={'projection': self.obs.wcs}, figsize=(8,8))
         else:
             f = plt.gcf()
         med = self.get_image(data=data, label=label, type_='median')
@@ -274,7 +282,7 @@ class PipeLine(object):
     def plot_STD(self, ax=None, data=None, label=None, title=None, norm=True, **kwargs ):
 
         if ax is None:
-            f, ax = plt.subplots(subplot_kw={'projection': self.wcs}, figsize=(8,8))
+            f, ax = plt.subplots(subplot_kw={'projection': self.obs.wcs}, figsize=(8,8))
         else:
             f = plt.gcf()
         med = self.get_image(data=data, label=label, type_='median')
