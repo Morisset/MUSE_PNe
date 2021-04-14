@@ -21,7 +21,7 @@ except:
     AI4NEB_INSTALLED = False
 
 #%%
-l_dic = {'4641.0': ('N', 2, '4641A', 1),
+l_dic = {'4641.0': ('N', 3, '4641A', 1),
          '4651.0' : ('O', 2, '4649A', 1),
          '4659.0' : ('Fe', 3, '4659A', 0),
          '4662.0' : ('O', 2, '4662A', 1),
@@ -32,27 +32,30 @@ l_dic = {'4641.0': ('N', 2, '4641A', 1),
          '4861.0' : ('H', 1, '4861A', 1),
          '4959.0' : ('O', 3, '4959A', 0),
          '5200.0' : ('N', 1, '5200A', 0),
-         '5343.0' : ('C', 2, '5342A', 1),
+         '5343.0' : ('C', 2, '5342.0A', 1),
          '5519.0' : ('Cl', 3, '5518A', 0),
-         '5539.0' : ('Cl', 3, '5538A', 0),
-         '5677' : ('N', 2, '5676A', 1),
-         '5681.0' : ('N', 2, '5679A', 1),
+         '5539' : ('Cl', 3, '5538A', 0),
+         '5677' : ('N', 2, '5676.02A', 1),
+         '5681.0' : ('N', 2, '5679.56A', 1),
          '5755.0' : ('N', 2, '5755A', 0),
          '5877' : ('He', 1, '5876A', 1),
          '6301.0' : ('O', 1, '6300A', 0),
          '6313' : ('S', 3, '6312A', 0),
          '6365.0' : ('O', 1, '6364A', 0),
-         '6463.0' : ('C', 2, '6461A', 0),
+         '6458.0' : ('C', 2, '6458A', 1), # Sure of this?
+         '6463.0' : ('C', 2, '6462.0A', 1),
          '6549.0' : ('N', 2, '6548A', 0),
          '6564.0' : ('H', 1, '6563A', 1),
          '6585.0' : ('N', 2, '6584A', 0),
          '6679.0' : ('He', 1, '6678A', 1),
          '6719.0' : ('S', 2, '6716A', 0),
          '6733.0' : ('S', 2, '6731A', 0),
-         '7002' : ('O', 4, '7004A', 0),
-         '7006.0' : ('Ne', 5, '7005A', 0),
+         #'7002' : ('O', 4, '7004A', 0),
+         '7006.0' : ('Ar', 5, '7005A', 0),
          '7067.0' : ('He', 1, '7065A', 1),
          '7137.0' : ('Ar', 3, '7136A', 0),
+         '7283' : ('He', 1, '7281A', 1),
+         # 7313???
          '7321.0' : ('O', 2, '7320A', 0),
          '7332.0' : ('O', 2, '7330A', 0),
          '7532.0' : ('Cl', 4, '7531A', 0),
@@ -62,7 +65,7 @@ l_dic = {'4641.0': ('N', 2, '4641A', 1),
          '7777' : ('O', 1, '7775A', 1),
          '8048.0' : ('Cl', 4, '8046A', 0),
          '8730.0' : ('C', 1, '8728A', 0),
-         '8736.0' : ('He', 1, '8733A', 1),
+         #'8736.0' : ('He', 1, '8733A', 1),
          '8753.0' : ('H', 1, '8750A', 1), 
          '9071.0' : ('S', 3, '9069A', 0),
          '9229.0' : ('H', 1, '9229A', 1)
@@ -71,13 +74,14 @@ l_dic = {'4641.0': ('N', 2, '4641A', 1),
 
 #%%
 
-def rename_files(data_dir, name):
+def rename_files(data_dir, name, newname=None):
     
     """
-    rename_files(data_dir = '/Users/christophemorisset/DATA/MUSE_Jorge/hektor_fits/ngc6778_maps/ngc6778_long_maps/', 
-                 name = 'ngc6778_MUSE_')
+    rename_files(data_dir = '/Users/christophemorisset/DATA/MUSE_Jorge/hektor_fits/ngc6778_maps/NGC6778_MUSEstat_maps/maps', 
+                 name = 'NGC6778_MUSE_', newname='NGC6778_MUSE_b_')
     """
-    
+    if newname is None:
+        newname = name
     for lam_str in l_dic:
         l = l_dic[lam_str]
         if l[3] == 1:
@@ -85,20 +89,20 @@ def rename_files(data_dir, name):
         else:
             rec_str = ''
         data_file = data_dir / Path('{}{}.fits'.format(name, lam_str))
-        new_data_file = data_dir / Path('{}{}{}{}_{}.fits'.format(name, l[0], l[1], rec_str, l[2]))
-        err_data_file1 = data_dir / Path('{}{}_error.fits'.format(name, lam_str))
-        new_edata_file1 = data_dir / Path('{}{}{}{}_{}_error.fits'.format(name, l[0], l[1], rec_str, l[2]))
-        err_data_file2 = data_dir / Path('{}{}_error_alfalike.fits'.format(name, lam_str))
-        new_edata_file2 = data_dir / Path('{}{}{}{}_{}_error_alfalike.fits'.format(name, l[0], l[1], rec_str, l[2]))
+        new_data_file = data_dir / Path('{}{}{}{}_{}.fits'.format(newname, l[0], l[1], rec_str, l[2]))
+        edata_file1 = data_dir / Path('{}{}_error.fits'.format(name, lam_str))
+        new_edata_file1 = data_dir / Path('{}{}{}{}_{}_error.fits'.format(newname, l[0], l[1], rec_str, l[2]))
+        edata_file2 = data_dir / Path('{}{}_error_alfalike.fits'.format(name, lam_str))
+        new_edata_file2 = data_dir / Path('{}{}{}{}_{}_error_alfalike.fits'.format(newname, l[0], l[1], rec_str, l[2]))
         if data_file.exists():
             print(data_file, '->', new_data_file)
             data_file.rename(new_data_file)
-        if err_data_file1.exists():
-            print(err_data_file1, '->', new_edata_file1)
-            err_data_file1.rename(new_edata_file1)
-        if err_data_file2.exists():
-            print(err_data_file2, '->', new_edata_file2)
-            err_data_file2.rename(new_edata_file2)
+        if edata_file1.exists():
+            print(edata_file1, '->', new_edata_file1)
+            edata_file1.rename(new_edata_file1)
+        if edata_file2.exists():
+            print(edata_file2, '->', new_edata_file2)
+            edata_file2.rename(new_edata_file2)
 
 #%%
 class PipeLine(object):
@@ -106,7 +110,8 @@ class PipeLine(object):
     def __init__(self, 
                  data_dir, 
                  name,
-                 error_str='_error'):
+                 error_str='_error', 
+                 err_default=0.0):
         """
 
 
@@ -120,6 +125,7 @@ class PipeLine(object):
         self.data_dir = data_dir
         self.name = name
         self.error_str = error_str
+        self.err_default = err_default
         self.MC_done = False
         self.N_MC = None
         self.TeNe = {}
@@ -163,7 +169,9 @@ class PipeLine(object):
         self.obs = pn.Observation(obs_name, fileFormat='fits_IFU', 
                                   corrected = False, 
                                   errStr=self.error_str, 
-                                  errIsRelative=False)
+                                  errIsRelative=False,
+                                  err_default=self.err_default,
+                                  addErrDefault = True)
         self.n_obs = self.obs.n_obs
 
     def add_MC(self, N_MC=None):
