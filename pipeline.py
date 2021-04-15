@@ -21,10 +21,10 @@ except:
     AI4NEB_INSTALLED = False
 
 #%%
-l_dic = {'4641.0': ('N', 3, '4641A', 1),
-         '4651.0' : ('O', 2, '4649A', 1),
+l_dic = {'4641.0' : ('N', 3, '4641A', 1),
+         '4651.0' : ('O', 2, '4649.13A', 1),
          '4659.0' : ('Fe', 3, '4659A', 0),
-         '4662.0' : ('O', 2, '4662A', 1),
+         '4662.0' : ('O', 2, '4661.63A', 1),
          '4686.0' : ('He', 2, '4686A', 1),
          '4711.0' : ('Ar', 4, '4711A', 0),
          '4713.0' : ('He', 1, '4713A', 1),
@@ -111,7 +111,8 @@ class PipeLine(object):
                  data_dir, 
                  name,
                  error_str='_error', 
-                 err_default=0.0):
+                 err_default=0.0,
+                 PDF_name='fig'):
         """
 
 
@@ -128,7 +129,9 @@ class PipeLine(object):
         self.err_default = err_default
         self.MC_done = False
         self.N_MC = None
+        self.PDF_name = PDF_name
         self.TeNe = {}
+        self.NII_corrected = False
         
         self.load_obs()
         """
@@ -173,7 +176,7 @@ class PipeLine(object):
                                   err_default=self.err_default,
                                   addErrDefault = True)
         self.n_obs = self.obs.n_obs
-
+        
     def add_MC(self, N_MC=None):
         
         if not self.MC_done:
@@ -237,7 +240,7 @@ class PipeLine(object):
 
     def plot(self, ax=None, data=None, label=None, image=None, type_='median', 
              title=None, label_cut=None, SN_cut=None, use_log=False, returnObs=False, 
-             interpolation='none', cb_title=None,  **kwargs):
+             interpolation='none', cb_title=None,  mask=None, **kwargs):
         
         if ax is None:
             f, ax = plt.subplots(subplot_kw={'projection': self.obs.wcs}, figsize=(8,8))
@@ -252,6 +255,8 @@ class PipeLine(object):
             if label_cut is None:
                 label_cut = label
             this_image[self.get_mask_SN(label_cut, SN_cut)] = np.nan
+        if mask is not None:
+            this_image[mask] = np.nan
         if use_log:
             with np.errstate(divide='ignore'):
                 this_image = np.log10(this_image)
@@ -339,6 +344,26 @@ class PipeLine(object):
         """
         Zhang 2005
         """
+        
+    def correc_NII(self, tem, den=1e3):
+        
+        if self.NII_corrected:
+            print('Already corrected')
+            return
+        I_5755 = self.obs.getIntens()['N2_5755A']
+        I_5679 = self.obs.getIntens()['N2r_5679.56A']        
+        pn.atomicData.setDataFile('n_ii_rec_P91.func')
+        N2rP = pn.RecAtom('N', 2, case='B')
+        pn.atomicData.setDataFile('n_ii_rec_FSL11.func')
+        N2rF = pn.RecAtom('N', 2, case='B')
+        R_5755_5679 = N2rP.getEmissivity(tem, den, label='5755.', product=False) / N2rF.getEmissivity(tem, den, label='5679.56', product=False)
+        I_5755_new = I_5755 - R_5755_5679*I_5679
+        for line in self.obs.lines:
+            if line.label == 'N2_5755A':
+                line.corrIntens = I_5755_new
+        self.NII_corrected = True
+
+        
 #%%
 
 
