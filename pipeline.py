@@ -132,6 +132,7 @@ class PipeLine(object):
         self.PDF_name = PDF_name
         self.TeNe = {}
         self.NII_corrected = False
+        self.OII_corrected = False
         
         self.load_obs()
         """
@@ -350,6 +351,8 @@ class PipeLine(object):
         if self.NII_corrected:
             print('Already corrected')
             return
+        if tem is None:
+            return
         I_5755 = self.obs.getIntens()['N2_5755A']
         I_5679 = self.obs.getIntens()['N2r_5679.56A']        
         pn.atomicData.setDataFile('n_ii_rec_P91.func')
@@ -362,6 +365,46 @@ class PipeLine(object):
             if line.label == 'N2_5755A':
                 line.corrIntens = I_5755_new
         self.NII_corrected = True
+
+
+    def correc_OII(self, tem, den=1e3, rec_label='O2r_4661.63A'): 
+        """
+        rec_label may be 'O2r_4661.63A' or 'O2r_4649.13A'
+        
+        """
+        
+        if self.OII_corrected:
+            print('Already corrected')
+            return
+        if tem is None:
+            return
+        
+        I_7320 = self.obs.getIntens()['O2_7320A']
+        I_7330 = self.obs.getIntens()['O2_7330A']
+        I_7325 = I_7320 + I_7330
+        
+        I_REC = self.obs.getIntens()[rec_label]
+        
+        pn.atomicData.setDataFile('o_ii_rec_P91.func')
+        O2rP = pn.RecAtom('O', 2, case='B') 
+        pn.atomicData.setDataFile('o_ii_rec_SSB17-B-opt.hdf5')
+        O2rS = pn.RecAtom('O', 2, case='B')
+        wave_str = rec_label.split('_')[1][:-1]
+        emisP = O2rP.getEmissivity(tem, den, label='7325+', product=False)
+        if rec_label == 'O2r_4649.13A':
+            emisR = O2rS.getEmissivity(tem, den, label='4649.13', product=False) + O2rS.getEmissivity(tem, den, label='4650.84', product=False)
+        else:
+            emisR = O2rS.getEmissivity(tem, den, label=wave_str, product=False)
+        R_7325_REC = emisP / emisR
+        
+        I_7325_new = I_7325 - R_7325_REC * I_REC
+
+        for line in self.obs.lines:
+            if line.label == 'O2_7320A':
+                line.corrIntens = I_7325_new * I_7320 / I_7325
+            if line.label == 'O2_7330A':
+                line.corrIntens = I_7325_new * I_7330 / I_7325
+        self.OII_corrected = True
 
         
 #%%
