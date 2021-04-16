@@ -14,6 +14,7 @@ pn.config.use_multiprocs()
 from astropy.io import fits
 from astropy.wcs import WCS
 from pathlib import Path
+from scipy.interpolate import interp1d
 try:
     from ai4neb import manage_RM
     AI4NEB_INSTALLED = True
@@ -42,7 +43,7 @@ l_dic = {'4641.0' : ('N', 3, '4641A', 1),
          '6301.0' : ('O', 1, '6300A', 0),
          '6313' : ('S', 3, '6312A', 0),
          '6365.0' : ('O', 1, '6364A', 0),
-         '6458.0' : ('C', 2, '6458A', 1), # Sure of this?
+         #'6458.0' : ('C', 2, '6458A', 1), # Sure of this?
          '6463.0' : ('C', 2, '6462.0A', 1),
          '6549.0' : ('N', 2, '6548A', 0),
          '6564.0' : ('H', 1, '6563A', 1),
@@ -288,7 +289,7 @@ class PipeLine(object):
         im=ax.imshow(this_image, **kwargs)
         cb = f.colorbar(im, ax=ax)
         if title is None:
-            this_title = 'S/N {}'.format(label)
+            this_title = 'Med/STD {}'.format(label)
         else:
             this_title = title
         ax.set_title(this_title)  
@@ -343,8 +344,55 @@ class PipeLine(object):
     
     def add_T_He(self):
         """
-        Zhang 2005
+        Mendez Delgado 2021
         """
+        dens = np.asarray((100,   500,  1000,  2000,  3000,  4000,  5000,  6000,  7000,
+                           8000,  9000, 10000, 12000, 15000, 20000, 25000, 30000, 40000,
+                           45000, 50000))
+        alpha = np.asarray((92984, 81830, 77896, 69126, 65040, 62517, 60744, 59402, 58334,
+                            57456, 56715, 56077, 55637, 55087, 54364, 53796, 53329, 52591,
+                            52289, 52019))
+        beta = np.asarray((-7455, -6031, -5527, -4378, -3851, -3529, -3305 ,-3137, -3004, 
+                           -2895, -2804, -2726, -2676, -2611, -2523, -2452, -2392, -2297, 
+                           -2257, -2222))
+        alpha_int = interp1d(dens, alpha)
+        beta_int = interp1d(dens, beta)
+        self.TeNe['He1']['Ne'] = (alpha_int(self.TeNe['N2S2']['Ne']) * 
+                                  self.obs.getIntens()['He1r_7281A'] / self.obs.getIntens()['He1r_6678A'] + 
+                                  beta_int(self.TeNe['N2S2']['Ne']))
+            
+        
+    def set_abunds(self, IP_cut = 35, label=None):
+        
+        atom_dic = {}
+        self.abund_dic = {}
+        Hbeta = self.obs.getIntens()['H1r_4861A']
+        
+        
+        for line in self.obs.getSortedLines():
+            if label is None or line.label == label: 
+                if line.atom not in atom_dic:
+                    if line.atom[-1] == 'r':
+                        atom = pn.RecAtom(line.elem, line.spec, case='A')
+                        IP = pn.utils.physics.IP[atom.elem][atom.spec-1]
+                    else:
+                        atom = pn.Atom(line.elem, line.spec)
+                        if atom.spec-2 < 0:
+                            IP = 0.
+                        else:
+                            IP = pn.utils.physics.IP[atom.elem][atom.spec-2]
+                    atom_dic[line.atom] = (atom, IP)
+                else:
+                    atom, IP = atom_dic[line.atom]
+                
+                if IP < IP_cut:
+                    Te = self.TeNe['N2S2']['Te']
+                    Ne = self.TeNe['N2S2']['Ne']
+                else:
+                    Te = self.TeNe['S3S2']['Te']
+                    Ne = self.TeNe['S3S2']['Ne']
+                self.log_.message('Abund from {} done.'.format(line.label))
+                self.abund_dic[line.label] = atom.getIonAbundance(line.corrIntens/Hbeta, Te, Ne, to_eval=line.to_eval, Hbeta=1.)
         
     def correc_NII(self, tem, den=1e3):
         
