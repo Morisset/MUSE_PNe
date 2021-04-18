@@ -133,3 +133,5 @@ dmypy.json
 *.tgz
 
 figures/
+
+.DS_Store
