@@ -15,6 +15,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from pathlib import Path
 from scipy.interpolate import interp1d
+import pandas as pd
 try:
     from ai4neb import manage_RM
     AI4NEB_INSTALLED = True
@@ -134,6 +135,19 @@ class PipeLine(object):
         self.TeNe = {}
         self.NII_corrected = False
         self.OII_corrected = False
+        self.atom_dic  = {}
+        self.abund_dic =  {}
+        self.ANN_inst_kwargs = {'RM_type' : 'SK_ANN', 
+                                'verbose' : False, 
+                                'scaling' : True,
+                                'use_log' : False,
+                                'random_seed' : None
+                                }
+        self.ANN_init_kwargs = {'solver' : 'lbfgs', 
+                                'activation' : 'tanh', 
+                                'hidden_layer_sizes' : (10, 10), 
+                                'max_iter' : 20000
+                                }
         
         self.load_obs()
         """
@@ -369,7 +383,7 @@ class PipeLine(object):
         self.TeNe['He1']['Te'] = Te
             
 
-    def add_Te_BJ(self, den=1e3, Hep=0.09, Hepp = 0.01):
+    def add_T_PJ(self, den=1e3, Hep=0.095, Hepp = 0.005):
     
         cont = pn.Continuum()
         tab_tem = np.linspace(1000, 30000, 100)
@@ -377,32 +391,74 @@ class PipeLine(object):
         tab_Hep = np.ones_like(tab_tem) * Hep
         tab_Hepp = np.ones_like(tab_tem) * Hepp
     
-        tab_BJ =  cont.BJ_HI(tab_tem, tab_den, tab_Hep, tab_Hepp, wl_bbj = 8100, wl_abj = 8400, HI_label='9_3')
-        tem_inter = interp1d(tab_BJ, tab_tem, bounds_error=False)
+        tab_PJ =  cont.BJ_HI(tab_tem, tab_den, tab_Hep, tab_Hepp, wl_bbj = 8100, wl_abj = 8400, HI_label='9_3')
+        tem_inter = interp1d(tab_PJ, tab_tem, bounds_error=False)
     
-        self.TeNe['BJ'] = {}
+        self.TeNe['PJ'] = {}
         C_8100 = self.obs.getIntens()['H1r_8100.0']
         C_8400 = self.obs.getIntens()['H1r_8400.0']
         HI = self.obs.getIntens()['H1r_9229A']
     
-        BJ_HI = (C_8100 - C_8400) /  HI
-        self.TeNe['BJ']['Te'] = tem_inter(BJ_HI)
+        PJ_HI = (C_8100 - C_8400) /  HI
+        self.TeNe['PJ']['Te'] = tem_inter(PJ_HI)
+                
+    def _make_grid_TPJ(self, tem_min=2000, tem_max=30000, 
+                       log_den_min=2, log_den_max=4, 
+                       Hep_min = 0.0, Hep_max = 1.0, 
+                       HeoH=0.1):
         
-        #self.TeNe['BJ']['Te'] = cont.T_BJ(BJ_HI, den, He1_H, He2_H, wl_bbj = 8100, wl_abj = 8400, HI_label='9_3',
-        #                              T_min=5e2, T_max=3e4)
-        return BJ_HI
+        N = 5000
+        tab_tem = tem_min + np.random.rand(N) * (tem_max - tem_min)
+        tab_log_den = log_den_min + np.random.rand(N) * (log_den_max - log_den_min)
+        tab_Hep = HeoH * (Hep_min + np.random.rand(N) * (Hep_max - Hep_min))
+        tab_Hepp = HeoH - tab_Hep
         
+        cont = pn.Continuum()
+        tab_PJ =  cont.BJ_HI(tab_tem, 10**tab_log_den, tab_Hep, tab_Hepp, wl_bbj = 8100, wl_abj = 8400, HI_label='9_3')
+        df = pd.DataFrame({'PJ':tab_PJ, 'tem':tab_tem, 'log_den':tab_log_den, 'Hep':tab_Hep})
+        df.to_csv('PJ_data.csv')
+
+    def _train_ML_PJ(self):
         
-    def set_abunds(self, IP_cut = 35, label=None):
+        try:
+            df = pd.read_csv('PJ_data.csv')
+        except:
+            self._make_grid_TPJ()
+            df = pd.read_csv('PJ_data.csv')
+        X = df[['PJ', 'log_den', 'Hep']]
+        y = np.log10(df[['tem']])
+        self.ANN = manage_RM(X_train=X, y_train=y, **self.ANN_inst_kwargs)
+        self.ANN.init_RM(**self.ANN_init_kwargs)
+        self.ANN.train_RM()
+
+    def add_T_PJ_ML(self):
+    
+        self.TeNe['PJ_ANN'] = {}
+        C_8100 = self.obs.getIntens()['H1r_8100.0']
+        C_8400 = self.obs.getIntens()['H1r_8400.0']
+        HI = self.obs.getIntens()['H1r_9229A']
+    
+        PJ_HI = (C_8100 - C_8400) /  HI
+        log_den = np.log10(self.TeNe['N2S2']['Ne'])
+        Hep = 0.1 * (self.abund_dic['He1r_6678A'] / (self.abund_dic['He1r_6678A'] + self.abund_dic['He2r_4686A']))
         
-        atom_dic = {}
-        self.abund_dic = {}
+        self._train_ML_PJ()
+        mask = np.isfinite(PJ_HI) & np.isfinite(log_den) & np.isfinite(Hep)
+        self.ANN.set_test(np.array((PJ_HI[mask], log_den[mask], Hep[mask])).T)
+        
+        self.ANN.predict()
+        pred = np.zeros_like(log_den) * np.nan
+        pred[mask] = self.ANN.pred
+        self.TeNe['PJ_ANN']['Te'] = 10**pred
+            
+    def set_abunds(self, IP_cut = 35, label=None, tem_HI=None):
+        
         Hbeta = self.obs.getIntens()['H1r_4861A']
         
         
         for line in self.obs.getSortedLines():
             if label is None or line.label == label: 
-                if line.atom not in atom_dic:
+                if line.atom not in self.atom_dic:
                     if line.atom[-1] == 'r':
                         atom = pn.RecAtom(line.elem, line.spec, case='A')
                         IP = pn.utils.physics.IP[atom.elem][atom.spec-1]
@@ -412,9 +468,9 @@ class PipeLine(object):
                             IP = 0.
                         else:
                             IP = pn.utils.physics.IP[atom.elem][atom.spec-2]
-                    atom_dic[line.atom] = (atom, IP)
+                    self.atom_dic[line.atom] = (atom, IP)
                 else:
-                    atom, IP = atom_dic[line.atom]
+                    atom, IP = self.atom_dic[line.atom]
                 
                 if IP < IP_cut:
                     Te = self.TeNe['N2S2']['Te']
@@ -422,8 +478,13 @@ class PipeLine(object):
                 else:
                     Te = self.TeNe['S3S2']['Te']
                     Ne = self.TeNe['S3S2']['Ne']
-                self.log_.message('Abund from {} done.'.format(line.label))
-                self.abund_dic[line.label] = atom.getIonAbundance(line.corrIntens/Hbeta, Te, Ne, to_eval=line.to_eval, Hbeta=1.)
+                self.log_.message('Abund from {} done.'.format(line.label), calling='PipeLine.set_abunds')
+                if line.is_valid:
+                    self.abund_dic[line.label] = atom.getIonAbundance(line.corrIntens/Hbeta, Te, Ne, 
+                                                                      to_eval=line.to_eval, Hbeta=1.,
+                                                                      tem_HI=tem_HI)
+                else:
+                    self.abund_dic[line.label] = None
         
     def correc_NII(self, tem, den=1e3):
         
