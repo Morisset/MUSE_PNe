@@ -368,21 +368,30 @@ class PipeLine(object):
         
         self.TeNe['He1']['Te'] = Te
             
-        
-    def add_Te_BJ(self):
-        
+
+    def add_Te_BJ(self, den=1e3, Hep=0.09, Hepp = 0.01):
+    
+        cont = pn.Continuum()
+        tab_tem = np.linspace(1000, 30000, 100)
+        tab_den = np.ones_like(tab_tem) * den
+        tab_Hep = np.ones_like(tab_tem) * Hep
+        tab_Hepp = np.ones_like(tab_tem) * Hepp
+    
+        tab_BJ =  cont.BJ_HI(tab_tem, tab_den, tab_Hep, tab_Hepp, wl_bbj = 8100, wl_abj = 8400, HI_label='9_3')
+        tem_inter = interp1d(tab_BJ, tab_tem, bounds_error=False)
+    
         self.TeNe['BJ'] = {}
         C_8100 = self.obs.getIntens()['H1r_8100.0']
         C_8400 = self.obs.getIntens()['H1r_8400.0']
         HI = self.obs.getIntens()['H1r_9229A']
-
-        cont = pn.Continuum()
+    
         BJ_HI = (C_8100 - C_8400) /  HI
-        den = self.TeNe['N2S2']['Ne']
-        He1_H = np.ones_like(den) * 0.09
-        He2_H = np.ones_like(den) * 0.01
-        self.TeNe['BJ']['Te'] = cont.T_BJ(BJ_HI, den, He1_H, He2_H, wl_bbj = 8100, wl_abj = 8400, HI_label='9_3',
-                                       T_min=5e2, T_max=3e4)
+        self.TeNe['BJ']['Te'] = tem_inter(BJ_HI)
+        
+        #self.TeNe['BJ']['Te'] = cont.T_BJ(BJ_HI, den, He1_H, He2_H, wl_bbj = 8100, wl_abj = 8400, HI_label='9_3',
+        #                              T_min=5e2, T_max=3e4)
+        return BJ_HI
+        
         
     def set_abunds(self, IP_cut = 35, label=None):
         
