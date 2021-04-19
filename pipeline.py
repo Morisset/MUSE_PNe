@@ -346,6 +346,7 @@ class PipeLine(object):
         """
         Mendez Delgado 2021
         """
+        self.TeNe['He1'] = {}
         dens = np.asarray((100,   500,  1000,  2000,  3000,  4000,  5000,  6000,  7000,
                            8000,  9000, 10000, 12000, 15000, 20000, 25000, 30000, 40000,
                            45000, 50000))
@@ -355,12 +356,33 @@ class PipeLine(object):
         beta = np.asarray((-7455, -6031, -5527, -4378, -3851, -3529, -3305 ,-3137, -3004, 
                            -2895, -2804, -2726, -2676, -2611, -2523, -2452, -2392, -2297, 
                            -2257, -2222))
-        alpha_int = interp1d(dens, alpha)
-        beta_int = interp1d(dens, beta)
-        self.TeNe['He1']['Ne'] = (alpha_int(self.TeNe['N2S2']['Ne']) * 
-                                  self.obs.getIntens()['He1r_7281A'] / self.obs.getIntens()['He1r_6678A'] + 
-                                  beta_int(self.TeNe['N2S2']['Ne']))
+        alpha_int = interp1d(dens, alpha, bounds_error=False)
+        beta_int = interp1d(dens, beta, bounds_error=False)
+        
+        alphas = alpha_int(self.TeNe['N2S2']['Ne'])
+        betas = beta_int(self.TeNe['N2S2']['Ne'])
+        R_He = self.obs.getIntens()['He1r_7281A'] / self.obs.getIntens()['He1r_6678A']
+        
+        Te = alphas * R_He + betas
+        Te[np.isinf(Te)] = np.nan
+        
+        self.TeNe['He1']['Te'] = Te
             
+        
+    def add_Te_BJ(self):
+        
+        self.TeNe['BJ'] = {}
+        C_8100 = self.obs.getIntens()['H1r_8100.0']
+        C_8400 = self.obs.getIntens()['H1r_8400.0']
+        HI = self.obs.getIntens()['H1r_9229A']
+
+        cont = pn.Continuum()
+        BJ_HI = (C_8100 - C_8400) /  HI
+        den = self.TeNe['N2S2']['Ne']
+        He1_H = np.ones_like(den) * 0.09
+        He2_H = np.ones_like(den) * 0.01
+        self.TeNe['BJ']['Te'] = cont.T_BJ(BJ_HI, den, He1_H, He2_H, wl_bbj = 8100, wl_abj = 8400, HI_label='9_3',
+                                       T_min=5e2, T_max=3e4)
         
     def set_abunds(self, IP_cut = 35, label=None):
         
