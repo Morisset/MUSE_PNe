@@ -23,6 +23,7 @@ try:
 except:
     AI4NEB_INSTALLED = False
 import os
+from multiprocessing import Pool
 
 #%%
 l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
@@ -443,12 +444,14 @@ class PipeLine(object):
         
         alphas = alpha_int(self.TeNe['N2S2']['Ne'])
         betas = beta_int(self.TeNe['N2S2']['Ne'])
-        R_He = self.obs.getIntens()['He1r_7281A'] / self.obs.getIntens()['He1r_6678A']
+        with np.errstate(divide='ignore', invalid='ignore'):
+            R_He = self.obs.getIntens()['He1r_7281A'] / self.obs.getIntens()['He1r_6678A']
         
         Te = alphas * R_He + betas
         Te[np.isinf(Te)] = np.nan
         
         self.TeNe['He1']['Te'] = Te
+        self.log_.message('Done', calling='Pipeline.add_T_He')
             
 
     def add_T_PJ(self, den=1e3, Hep=0.095, Hepp = 0.005):
@@ -469,7 +472,8 @@ class PipeLine(object):
         with np.errstate(divide='ignore', invalid='ignore'):
             PJ_HI = (C_8100 - C_8400) /  HI
         self.TeNe['PJ']['Te'] = tem_inter(PJ_HI)
-                
+        self.log_.message('Done', calling='Pipeline.add_T_PJ')
+               
     def _make_grid_TPJ(self, tem_min=2000, tem_max=30000, 
                        log_den_min=2, log_den_max=4, 
                        Hep_min = 0.0, Hep_max = 1.0, 
@@ -519,6 +523,8 @@ class PipeLine(object):
         pred = np.zeros_like(log_den) * np.nan
         pred[mask] = self.ANN.pred
         self.TeNe['PJ_ANN']['Te'] = 10**pred
+        self.log_.message('Done', calling='Pipeline.add_T_PJ_ML')
+        
             
     def set_abunds(self, IP_cut = 35, label=None, tem_HI=None):
         
@@ -570,7 +576,8 @@ class PipeLine(object):
         pn.atomicData.setDataFile('n_ii_rec_FSL11.func')
         N2rF = pn.RecAtom('N', 2, case='B')
         R_5755_5679 = N2rP.getEmissivity(tem, den, label='5755.', product=False) / N2rF.getEmissivity(tem, den, label='5679.56', product=False)
-        I_5755_new = I_5755 - R_5755_5679*I_5679
+        with np.errstate(divide='ignore', invalid='ignore'):
+            I_5755_new = I_5755 - R_5755_5679*I_5679
         for line in self.obs.lines:
             if line.label == 'N2_5755A':
                 line.corrIntens = I_5755_new
@@ -605,19 +612,171 @@ class PipeLine(object):
             emisR = O2rS.getEmissivity(tem, den, label='4649.13', product=False) + O2rS.getEmissivity(tem, den, label='4650.84', product=False)
         else:
             emisR = O2rS.getEmissivity(tem, den, label=wave_str, product=False)
-        R_7325_REC = emisP / emisR
-        
-        I_7325_new = I_7325 - R_7325_REC * I_REC
+        with np.errstate(divide='ignore', invalid='ignore'):
+            R_7325_REC = emisP / emisR
+            I_7325_new = I_7325 - R_7325_REC * I_REC
 
         for line in self.obs.lines:
-            if line.label == 'O2_7319A+':
-                line.corrIntens = I_7325_new * I_7320 / I_7325
-            if line.label == 'O2_7330A+':
-                line.corrIntens = I_7325_new * I_7330 / I_7325
+            with np.errstate(divide='ignore', invalid='ignore'):
+                if line.label == 'O2_7319A+':
+                    line.corrIntens = I_7325_new * I_7320 / I_7325
+                if line.label == 'O2_7330A+':
+                    line.corrIntens = I_7325_new * I_7330 / I_7325
         self.OII_corrected = True
 
         
 #%%
 
+def run_pipeline(obj_name, Te_corr):
+        
+    if Te_corr is None:
+        PDF_name = 'figures/{}_NoCorr'.format(obj_name)
+    else:
+        PDF_name = 'figures/{}_{}'.format(obj_name, Te_corr)
+    data_dir = Path(os.environ['MUSE_DATA']) / Path('{}/maps'.format(obj_name))
+    
+    PL = PipeLine(data_dir = data_dir,
+                  name = '{}_MUSE_b_*.fits'.format(obj_name), 
+                  error_str='error', err_default=0.05,
+                  PDF_name=PDF_name)
+
+    PL.log_.level=3
+    
+    PL.obs.addSum(('O1r_7771A', 'O1r_7773A', 'O1r_7775A'), 'O1r_7773+')
+    
+    PL.obs.removeLine('O1r_7771A')
+    PL.obs.removeLine('O1r_7773A')
+    PL.obs.removeLine('O1r_7775A')
+    
+    PL.obs.getLine(label='O2r_4649.13A').to_eval = 'L(4649.13) + L(4650.84)'
+    
+    PL.add_MC(50)
+    print('Data shape:', PL.obs.data_shape)
+    print('Number of lines , valid ones: ', PL.obs.n_lines,PL.obs.n_valid_lines)
+    
+    PL.obs.def_EBV()
+    PL.red_cor_obs(EBV_min = 0., plot_=False)    
+
+    PL.correc_NII(Te_corr)
+    PL.correc_OII(Te_corr, rec_label='O2r_4649.13A')    
+    
+    PL.make_diags()    
+    
+    PL.diags.ANN_inst_kwargs['verbose']=True
+    PL.diags.ANN_init_kwargs['activation']='tanh' #identity’, ‘logistic’, ‘tanh’, ‘relu’
+    PL.diags.ANN_init_kwargs['solver']= 'lbfgs' #‘lbfgs’, ‘sgd’, ‘adam’
+    PL.diags.ANN_init_kwargs['hidden_layer_sizes'] = (10, 20, 10)
+    
+    print(PL.n_obs)
+    pn.log_.timer('Starting', quiet=True)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        PL.add_gCTD('N2S2', '[NII] 5755/6548', '[SII] 6731/6716')
+        PL.add_gCTD('N2S2_84', '[NII] 5755/6584', '[SII] 6731/6716')
+        PL.add_gCTD('S3Cl3', '[SIII] 6312/9069', '[ClIII] 5538/5518')
+        PL.add_gCTD('S3S2', '[SIII] 6312/9069', '[SII] 6731/6716')
+        PL.add_gCTD('S3Ar4', '[SIII] 6312/9069', '[ArIV] 4740/4711')
+    pn.log_.timer('ANN getCrossTemDen done')    
+    
+    PL.add_T_He()
+    
+    PL.set_abunds()    
+    
+    PL.add_T_PJ()
+    PL.add_T_PJ_ML()     
+    
+    f,ax = plt.subplots(1, 1, figsize=(8, 7), subplot_kw={'projection': PL.obs.wcs})
+    PL.plot(ax=ax, image=PL.get_image(PL.obs.extinction.cHbeta, type_='orig'), vmin=0.5, vmax=.8, title='cHbeta',
+                label_cut=('H1r_6563A', 'H1r_4861A'), SN_cut=2.5)
+    f.savefig(PL.PDF_name+'_cHbeta.pdf')
 
 
+    SN_cut = 2
+    f, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, subplot_kw={'projection': PL.obs.wcs}, figsize=(15,10))
+    PL.plot(ax=ax1, data=PL.TeNe['N2S2']['Te'], title='Te N2S2', vmin=6000, vmax=13000, 
+            label_cut=('N2_6548A', 'N2_5755A', 'S2_6716A', 'S2_6731A'), SN_cut=SN_cut)
+    PL.plot(ax=ax2, data=PL.TeNe['S3S2']['Te'], title='Te S3S2', vmin=6000, vmax=13000, 
+            label_cut=('S3_9069A', 'S3_6312A', 'S2_6716A', 'S2_6731A'), SN_cut=SN_cut)
+    PL.plot(ax=ax3, data=PL.TeNe['S3Ar4']['Te'], title='Te S3Ar4', vmin=6000, vmax=13000, 
+            label_cut=('S3_9069A', 'S3_6312A', 'Ar4_4711A', 'Ar4_4740A'), SN_cut=None)
+    PL.plot(ax=ax4, data=np.log10(PL.TeNe['N2S2']['Ne']), title='log Ne N2S2', vmin=2, vmax=3.5, 
+            label_cut=('N2_6548A', 'N2_5755A', 'S2_6716A', 'S2_6731A'), SN_cut=SN_cut)
+    PL.plot(ax=ax5, data=np.log10(PL.TeNe['S3Cl3']['Ne']), title='log Ne S3Cl3', vmin=2, vmax=3.5, 
+            label_cut=('S3_9069A', 'S3_6312A', 'Cl3_5518A', 'Cl3_5538A'), SN_cut=SN_cut, type_='orig')
+    PL.plot(ax=ax6, data=np.log10(PL.TeNe['S3Ar4']['Ne']), title='Ne S3Ar4', vmin=2, vmax=4.5, 
+            label_cut=('S3_9069A', 'S3_6312A', 'Ar4_4711A', 'Ar4_4740A'), SN_cut=None, type_='median')
+    f.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.7, hspace=-0.2)
+    f.savefig(PL.PDF_name+'_TeNe.pdf')
+
+
+    line_labels = ('He1r_6678A', 'He2r_4686A', 'C1_8728A', 'C2r_6462.0A', 'N1_5199A+', 
+                   'N2_6548A' 'N2r_5679.56A', 'O1_6300A', 'O1r_7773+', 'O2_7330A+',
+                   'O2r_4649.13A', 'O3_4959A', 'S2_6731A', 'S3_9069A',
+                   'Cl3_5518A', 'Cl4_8046A', 'Ar3_7136A', 'Ar4_4740A', 'Ar5_7005A')
+    
+    f, axes = plt.subplots(7,3,figsize=(15,25), subplot_kw={'projection': PL.obs.wcs})
+    i_axes = 0
+    for line in PL.obs.getSortedLines(crit='mass'):
+        if line.label in line_labels:
+            if line.is_valid:
+                mask = PL.get_mask_SN(line.label, 1.5)
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    to_show = 12+np.log10(PL.abund_dic[line.label])
+                to_show[np.isinf(to_show)] = np.nan
+                med = np.nanmedian(PL.get_image(to_show, type_='orig')[~mask])
+                to_show[to_show < (med - 6)] = np.nan
+                med = np.nanmedian(PL.get_image(to_show, type_='orig')[~mask])
+                std = np.nanstd(PL.get_image(to_show, type_='orig')[~mask])
+                vmin = med - 1.5 * std
+                vmax = med + 1.5 * std
+                #print(line.label, max_to_show, med, std, vmin, vmax, mask.sum())
+                PL.plot(data=to_show, title=line.label, ax=axes.ravel()[i_axes], vmin=vmin, vmax=vmax, type_='orig', mask=mask)
+                i_axes += 1
+            else:
+                print('{} is invalid'.format(line.label))
+        else:
+            print('{} not in selected lines'.format(line.label))
+    f.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.4, hspace=0.5)
+    f.savefig(PL.PDF_name+'_abunds.pdf')
+
+
+    PL.abund_dic['He'] = PL.abund_dic['He1r_6678A'] + PL.abund_dic['He2r_4686A']
+    f, ax = plt.subplots(subplot_kw={'projection': PL.obs.wcs})
+    with np.errstate(divide='ignore', invalid='ignore'):
+        PL.plot(data=12+np.log10(PL.abund_dic['He']), title='He/H', vmin=11.15, vmax=11.25, 
+                type_='orig', ax=ax)
+    f.savefig(PL.PDF_name+'_HeoH.pdf')    
+    
+    
+    f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2,2,figsize=(10,10), subplot_kw={'projection': PL.obs.wcs})
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ADF_Op = np.log10(PL.abund_dic['O1r_7773+'] / (PL.abund_dic['O2_7319A+']+PL.abund_dic['O2_7330A+']) * 2)
+        ADF_Opp = np.log10(PL.abund_dic['O2r_4649.13A'] / PL.abund_dic['O3_4959A'])
+    
+    PL.plot(data=ADF_Op, title='ADF(O+)', ax=ax1, vmin=0, vmax=3., type_='orig')
+    PL.plot(data=ADF_Op, title='STD ADF(O+)', ax=ax2, vmin=0, vmax=.5, type_='std')
+    PL.plot(data=ADF_Opp, title='ADF(O++)', ax=ax3, vmin=0, vmax=2., type_='orig')
+    PL.plot(data=ADF_Opp, title='STD ADF(O++)', ax=ax4, vmin=0, vmax=.5, type_='std')
+    f.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.5, hspace=0.)
+    f.savefig(PL.PDF_name+'_ADFs.pdf')    
+        
+    f, (ax1, ax2, ax3) = plt.subplots(1, 3, subplot_kw={'projection': PL.obs.wcs}, figsize=(16,6))
+    if obj_name == 'HF22':
+        vmin=1000
+        vmax=4000
+    else:
+        vmin=3000
+        vmax=9000
+    PL.plot(data=PL.TeNe['He1']['Te'], vmin=vmin, vmax=vmax, title='Te He1', ax=ax1, SN_cut=4, label_cut='He1r_7281A')
+    PL.plot(data=PL.TeNe['PJ']['Te'], vmin=vmin, vmax=vmax,  title='Te PJ', ax=ax2, SN_cut=4, label_cut='He1r_7281A')
+    PL.plot(data=PL.TeNe['PJ_ANN']['Te'], vmin=vmin, vmax=vmax,  title='Te PJ ANN', ax=ax3, SN_cut=4, label_cut='He1r_7281A')
+    f.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.6, hspace=0.)
+    f.savefig(PL.PDF_name+'_Te_altern.pdf')
+    
+    plt.close('all')
+        
+def do_all():
+
+    for obj_name in ('NGC6778', 'HF22', 'M142'):
+        for Te_corr in (None, 3000, 6000, 8000):
+            run_pipeline(obj_name, Te_corr)
