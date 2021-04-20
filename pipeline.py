@@ -9,6 +9,7 @@ Created on Tue Apr  6 09:49:26 2021
 
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import pyneb as pn
 pn.config.use_multiprocs()
 from astropy.io import fits
@@ -33,7 +34,7 @@ l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
                      '4741.0' : ('Ar', 4, '4740A', 0),
                      '4861.0' : ('H', 1, '4861A', 1),
                      '4959.0' : ('O', 3, '4959A', 0),
-                     '5200.0' : ('N', 1, '5200A', 0),
+                     '5200.0' : ('N', 1, '5199A+', 0),
                      '5343.0' : ('C', 2, '5342.0A', 1),
                      '5519.0' : ('Cl', 3, '5518A', 0),
                      '5539.0' : ('Cl', 3, '5538A', 0),
@@ -55,8 +56,8 @@ l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
                      '7067.0' : ('He', 1, '7065A', 1),
                      '7137.0' : ('Ar', 3, '7136A', 0),
                      '7283' : ('He', 1, '7281A', 1),
-                     '7321.0' : ('O', 2, '7320A', 0),
-                     '7332.0' : ('O', 2, '7330A', 0),
+                     '7321.0' : ('O', 2, '7319A+', 0),
+                     '7332.0' : ('O', 2, '7330A+', 0),
                      '7532.0' : ('Cl', 4, '7531A', 0),
                      '7753.0' : ('Ar', 3, '7751A', 0),
                      '7772.0' : ('O', 1, '7771A', 1),
@@ -77,7 +78,7 @@ l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
                      '4741.0' : ('Ar', 4, '4740A', 0),
                      '4861.0' : ('H', 1, '4861A', 1),
                      '4959.0' : ('O', 3, '4959A', 0),
-                     '5200.0' : ('N', 1, '5200A', 0),
+                     '5200.0' : ('N', 1, '5199A+', 0),
                      '5343.0' : ('C', 2, '5342.0A', 1),
                      '5519.0' : ('Cl', 3, '5518A', 0),
                      '5539.0' : ('Cl', 3, '5538A', 0),
@@ -99,8 +100,8 @@ l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
                      '7067.0' : ('He', 1, '7065A', 1),
                      '7137.0' : ('Ar', 3, '7136A', 0),
                      '7283' : ('He', 1, '7281A', 1),
-                     '7321.0' : ('O', 2, '7320A', 0),
-                     '7332.0' : ('O', 2, '7330A', 0),
+                     '7321.0' : ('O', 2, '7319A+', 0),
+                     '7332.0' : ('O', 2, '7330A+', 0),
                      '7532.0' : ('Cl', 4, '7531A', 0),
                      '7753.0' : ('Ar', 3, '7751A', 0),
                      '7772.0' : ('O', 1, '7771A', 1),
@@ -121,7 +122,7 @@ l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
                  '4739.0' : ('Ar', 4, '4740A', 0),
                  '4860.0' : ('H', 1, '4861A', 1),
                  '4958.0' : ('O', 3, '4959A', 0),
-                 '5198.0' : ('N', 1, '5200A', 0),
+                 '5198.0' : ('N', 1, '5199A+', 0),
                  '5343.0' : ('C', 2, '5342.0A', 1),
                  '5516.0' : ('Cl', 3, '5518A', 0),
                  '5536.0' : ('Cl', 3, '5538A', 0),
@@ -142,8 +143,8 @@ l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
                  '7063.0' : ('He', 1, '7065A', 1),
                  '7134.0' : ('Ar', 3, '7136A', 0),
                  '7280.0' : ('He', 1, '7281A', 1),
-                 '7318.0' : ('O', 2, '7320A', 0),
-                 '7328.0' : ('O', 2, '7330A', 0),
+                 '7318.0' : ('O', 2, '7319A+', 0),
+                 '7328.0' : ('O', 2, '7330A+', 0),
                  '7528.0' : ('Cl', 4, '7531A', 0),
                  '7749.0' : ('Ar', 3, '7751A', 0),
                  '7770.0' : ('O', 1, '7771A', 1),
@@ -199,7 +200,8 @@ class PipeLine(object):
                  name,
                  error_str='_error', 
                  err_default=0.0,
-                 PDF_name='fig'):
+                 PDF_name='fig',
+                 cmap='viridis'):
         """
 
 
@@ -222,6 +224,7 @@ class PipeLine(object):
         self.OII_corrected = False
         self.atom_dic  = {}
         self.abund_dic =  {}
+        self.cmap = cmap
         self.ANN_inst_kwargs = {'RM_type' : 'SK_ANN', 
                                 'verbose' : False, 
                                 'scaling' : True,
@@ -265,7 +268,9 @@ class PipeLine(object):
         
         if label is not None:
             if isinstance(label, tuple):
-                return self.get_image(label=label[0], type_=type_) / self.get_image(label=label[1], type_=type_)
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    to_return = self.get_image(label=label[0], type_=type_) / self.get_image(label=label[1], type_=type_)
+                return to_return
             d2return = self.obs.getIntens(returnObs=returnObs)[label]
         else:
             d2return = data
@@ -333,10 +338,11 @@ class PipeLine(object):
         if mask is not None:
             this_image[mask] = np.nan
         if use_log:
-            with np.errstate(divide='ignore'):
+            with np.errstate(divide='ignore', invalid='ignore'):
                 this_image = np.log10(this_image)
-        im=ax.imshow(this_image, interpolation=interpolation, **kwargs)
-        cb = f.colorbar(im, ax=ax)
+        im=ax.imshow(this_image, interpolation=interpolation, cmap=self.cmap, **kwargs)
+
+        cb = f.colorbar(im, ax=ax, fraction=0.048, pad=0.0)
         cb.ax.get_yaxis().labelpad = 20
         cb.ax.set_ylabel(cb_title, rotation=270)
         if title is None:
@@ -346,7 +352,10 @@ class PipeLine(object):
                 this_title = '{} ({})'.format(label, type_)
         else:
             this_title = title
-        ax.set_title(this_title)  
+        ax.set_title(this_title)
+        ax.set_xlabel('RA')
+        ax.set_ylabel('Dec')
+
         
         
     def plot_SN(self, ax=None, data=None, label=None, title=None, **kwargs ):
@@ -359,7 +368,7 @@ class PipeLine(object):
         std = self.get_image(data=data, label=label, type_='std')
         with np.errstate(divide='ignore'):
             this_image = med / std
-        im=ax.imshow(this_image, **kwargs)
+        im=ax.imshow(this_image, cmap=self.cmap, **kwargs)
         cb = f.colorbar(im, ax=ax)
         if title is None:
             this_title = 'Med/STD {}'.format(label)
@@ -380,7 +389,7 @@ class PipeLine(object):
                 this_image = std / med * 100
             else:
                 this_image = std
-        im=ax.imshow(this_image, **kwargs)
+        im=ax.imshow(this_image, cmap=self.cmap, **kwargs)
         cb = f.colorbar(im, ax=ax)
         if title is None:
             if norm:
@@ -457,8 +466,8 @@ class PipeLine(object):
         C_8100 = self.obs.getIntens()['H1r_8100.0']
         C_8400 = self.obs.getIntens()['H1r_8400.0']
         HI = self.obs.getIntens()['H1r_9229A']
-    
-        PJ_HI = (C_8100 - C_8400) /  HI
+        with np.errstate(divide='ignore', invalid='ignore'):
+            PJ_HI = (C_8100 - C_8400) /  HI
         self.TeNe['PJ']['Te'] = tem_inter(PJ_HI)
                 
     def _make_grid_TPJ(self, tem_min=2000, tem_max=30000, 
@@ -497,8 +506,9 @@ class PipeLine(object):
         C_8400 = self.obs.getIntens()['H1r_8400.0']
         HI = self.obs.getIntens()['H1r_9229A']
     
-        PJ_HI = (C_8100 - C_8400) /  HI
-        log_den = np.log10(self.TeNe['N2S2']['Ne'])
+        with np.errstate(divide='ignore', invalid='ignore'):
+            PJ_HI = (C_8100 - C_8400) /  HI
+            log_den = np.log10(self.TeNe['N2S2']['Ne'])
         Hep = 0.1 * (self.abund_dic['He1r_6678A'] / (self.abund_dic['He1r_6678A'] + self.abund_dic['He2r_4686A']))
         
         self._train_ML_PJ()
@@ -537,13 +547,14 @@ class PipeLine(object):
                 else:
                     Te = self.TeNe['S3S2']['Te']
                     Ne = self.TeNe['S3S2']['Ne']
-                self.log_.message('Abund from {} done.'.format(line.label), calling='PipeLine.set_abunds')
                 if line.is_valid:
                     self.abund_dic[line.label] = atom.getIonAbundance(line.corrIntens/Hbeta, Te, Ne, 
                                                                       to_eval=line.to_eval, Hbeta=1.,
                                                                       tem_HI=tem_HI)
                 else:
                     self.abund_dic[line.label] = None
+                self.log_.message('Abund from {} done.'.format(line.label), calling='PipeLine.set_abunds')
+
         
     def correc_NII(self, tem, den=1e3):
         
@@ -578,8 +589,8 @@ class PipeLine(object):
         if tem is None:
             return
         
-        I_7320 = self.obs.getIntens()['O2_7320A']
-        I_7330 = self.obs.getIntens()['O2_7330A']
+        I_7320 = self.obs.getIntens()['O2_7319A+']
+        I_7330 = self.obs.getIntens()['O2_7330A+']
         I_7325 = I_7320 + I_7330
         
         I_REC = self.obs.getIntens()[rec_label]
@@ -599,9 +610,9 @@ class PipeLine(object):
         I_7325_new = I_7325 - R_7325_REC * I_REC
 
         for line in self.obs.lines:
-            if line.label == 'O2_7320A':
+            if line.label == 'O2_7319A+':
                 line.corrIntens = I_7325_new * I_7320 / I_7325
-            if line.label == 'O2_7330A':
+            if line.label == 'O2_7330A+':
                 line.corrIntens = I_7325_new * I_7330 / I_7325
         self.OII_corrected = True
 
