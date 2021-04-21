@@ -131,6 +131,7 @@ dmypy.json
 *.ai4neb_sk
 *.pickle
 *.tgz
+*.pickle.gz
 
 figures/
 
