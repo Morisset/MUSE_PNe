@@ -445,7 +445,7 @@ class PipeLine(object):
             if not ANN.model_read:
                 ANN = None
         Te, Ne = self.diags.getCrossTemDen(diag1, diag2, obs=self.obs, use_ANN=use_ANN, ANN=ANN,
-                                           limit_res=limit_res, **kwargs)
+                                           limit_res=limit_res, end_tem=30000, **kwargs)
         if use_ANN and ANN is None and save:
             self.diags.ANN.save_RM(filename=label, save_train=True, save_test=True)
         self.TeNe[label] = {'Te': Te, 'Ne': Ne}
@@ -551,7 +551,7 @@ class PipeLine(object):
         self.log_.message('Done', calling='Pipeline.add_T_PJ_ML')
         
             
-    def set_abunds(self, IP_cut = 35, label=None, tem_HI=None):
+    def set_abunds(self, IP_cut = 17, label=None, tem_HI=None):
         
         Hbeta = self.obs.getIntens()['H1r_4861A']
         
@@ -653,21 +653,26 @@ class PipeLine(object):
         
         with gzip.open(filename, 'wb') as handle:
             pickle.dump(self.TeNe, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        self.log_.message('Done', calling='Pipeline.save_TeNe')
+
             
     def read_TeNe(self, filename):
         
         with gzip.open(filename, 'rb') as handle:
             self.TeNe = pickle.load(handle)
+        self.log_.message('Done', calling='Pipeline.read_TeNe')
         
     def save_abunds(self, filename):
         
         with gzip.open(filename, 'wb') as handle:
             pickle.dump(self.abund_dic, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        self.log_.message('Done', calling='Pipeline.save_abunds')
             
     def read_abunds(self, filename):
         
         with gzip.open(filename, 'rb') as handle:
             self.abund_dic = pickle.load(handle)
+        self.log_.message('Done', calling='Pipeline.read_abunds')
 
     
 #%% run pipeline and all
@@ -691,7 +696,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=None):
     
     PL.obs.getLine(label='O2r_4649.13A').to_eval = 'L(4649.13) + L(4650.84)'
     
-    PL.add_MC(50)
+    PL.add_MC(150)
     print('Data shape:', PL.obs.data_shape)
     print('Number of lines , valid ones: ', PL.obs.n_lines,PL.obs.n_valid_lines)
     
@@ -731,6 +736,6 @@ def run_pipeline(obj_name, Te_corr, random_seed=None):
         
 def run_all():
 
-    for obj_name in ('NGC6778',  'M142'): #'HF22',
-        for Te_corr in (None, 3000, 6000, 8000):
+    for obj_name in ('HF22','NGC6778','M142'): #'HF22','NGC6778','M142', 
+        for Te_corr in (None, 3000, 8000):
             run_pipeline(obj_name, Te_corr, random_seed=42)
