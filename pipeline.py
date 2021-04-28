@@ -248,7 +248,7 @@ class PipeLine(object):
         """
         
         
-    def load_obs(self):
+    def load_obs(self, clean_error=1e-5):
         
         obs_name = Path(self.data_dir) / Path('{}_MUSE_b_*.fits'.format(self.obj_name))
         self.obs = pn.Observation(obs_name, fileFormat='fits_IFU', 
@@ -272,12 +272,16 @@ class PipeLine(object):
         err_int_dic = self.obs_int.getError(returnObs=True)
         for line in self.obs.getSortedLines():
             line.obsIntens *= self.flux_normalisation
+            mask = np.abs(line.obsError - self.err_default) < clean_error
+            line.obsIntens[mask] = np.nan
             try:
                 line.obsIntens[0] = obs_int_dic[line.label][0]
                 line.obsError[0] = err_int_dic[line.label][0]
             except:
                 self.log_.warn('Integrated value for {} not done'.format(line.label),
                                 calling='PipeLine.load_obs')
+            
+        
         
         self.n_obs = self.obs.n_obs
         
@@ -344,6 +348,8 @@ class PipeLine(object):
         
         return mask
 
+    
+
     def plot(self, ax=None, data=None, label=None, image=None, type_='median', 
              title=None, label_cut=None, SN_cut=None, use_log=False, returnObs=False, 
              interpolation='none', cb_title=None,  mask=None, **kwargs):
@@ -379,8 +385,8 @@ class PipeLine(object):
         else:
             this_title = title
         ax.set_title(this_title)
-        ax.set_xlabel('RA')
-        ax.set_ylabel('Dec')
+        ax.set_xlabel('Right Ascension')
+        ax.set_ylabel('Declination')
 
         
         
@@ -730,12 +736,12 @@ def run_pipeline(obj_name, Te_corr, random_seed=None):
     PL.add_T_PJ()
     PL.add_T_PJ_ML()
     
-    PL.save_TeNe('{}_{}_TeNe.pickle.gz'.format(obj_name, Te_corr))
-    PL.save_abunds('{}_{}_abunds.pickle.gz'.format(obj_name, Te_corr))
+    PL.save_TeNe('{}/PipelineResults/{}_{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr))
+    PL.save_abunds('{}/PipelineResults/{}_{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr))
     
         
 def run_all():
 
-    for obj_name in ('HF22','NGC6778','M142'): #'HF22','NGC6778','M142', 
+    for obj_name in ('M142', ): #'HF22','NGC6778','M142', 
         for Te_corr in (None, 3000, 8000):
             run_pipeline(obj_name, Te_corr, random_seed=42)
