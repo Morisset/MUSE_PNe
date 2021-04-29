@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import pyneb as pn
+from pyneb.utils.misc import parseAtom, int_to_roman
 pn.config.use_multiprocs()
 from astropy.io import fits
 from astropy.wcs import WCS
@@ -194,6 +195,38 @@ def rename_files(obj_name):
         if edata_file2.exists():
             print(edata_file2, '->', new_edata_file2)
             edata_file2.rename(new_edata_file2)
+#%% get_label_str
+
+def get_label_str(label):
+    
+    
+    
+    lab1 = label.split('_')[0]
+    lab3 = label.split('_')[1]
+    if lab1[-1] == 'r':
+        lab1 = '{}'.format(lab1[0:-1])
+        forb = False
+    else:
+        forb = True
+        
+    lab1, lab2 = parseAtom(lab1)
+
+    lab2 = int_to_roman(int(lab2))
+    
+    if forb:
+        lab1 = '[{} {}]'.format(lab1, lab2)
+    else:
+        lab1 = '{} {}'.format(lab1, lab2)
+        
+    if lab3[-1] == '+':
+        lab3 = lab3[0:-1]
+        blend_str = '+'
+    else:
+        blend_str=''
+    if lab3[-1] == 'A':
+        lab3 = lab3[0:-1]
+    lab3 = lab3.split('.')[0]
+    return '{} {}{}'.format(lab1, lab3, blend_str)
 
 #%% Pipeline
 class PipeLine(object):
