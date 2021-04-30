@@ -9,12 +9,9 @@ Created on Tue Apr  6 09:49:26 2021
 
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import pyneb as pn
 from pyneb.utils.misc import parseAtom, int_to_roman
 pn.config.use_multiprocs()
-from astropy.io import fits
-from astropy.wcs import WCS
 from pathlib import Path
 from scipy.interpolate import interp1d
 import pandas as pd
@@ -24,9 +21,9 @@ try:
 except:
     AI4NEB_INSTALLED = False
 import os
-from multiprocessing import Pool
 import pickle
 import gzip
+import pymysql
 
 #%% Define dictionnaries hektor to pyneb
 l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
@@ -195,10 +192,10 @@ def rename_files(obj_name):
         if edata_file2.exists():
             print(edata_file2, '->', new_edata_file2)
             edata_file2.rename(new_edata_file2)
+
 #%% get_label_str
 
 def get_label_str(label):
-    
     
     
     lab1 = label.split('_')[0]
@@ -228,6 +225,43 @@ def get_label_str(label):
     lab3 = lab3.split('.')[0]
     return '{} {}{}'.format(lab1, lab3, blend_str)
 
+#%% Get from 3MdB
+
+def get_ICFs_3MdB():
+    
+    host = os.environ['MdB_HOST']
+    user = os.environ['MdB_USER']
+    passwd = os.environ['MdB_PASSWD']
+    port = os.environ['MdB_PORT']
+    
+    
+    db = pymysql.connect(host=host, user=user, passwd=passwd, port=int(port), db='3MdB_17')
+    res = pd.read_sql("""SELECT 
+A_HYDROGEN_vol_1 as Hp,
+A_HELIUM_vol_1 as Hep,
+A_HELIUM_vol_2 as Hepp,
+A_CARBON_vol_1 as Cp,
+A_NITROGEN_vol_1 as Np,
+A_OXYGEN_vol_1 as Op,
+A_OXYGEN_vol_2 as Opp,
+A_SULPHUR_vol_1 as Sp,
+A_SULPHUR_vol_2 as Spp,
+A_CHLORINE_vol_2 as Clpp,
+A_CHLORINE_vol_3 as Clppp,
+A_ARGON_vol_2 as Arpp,
+A_ARGON_vol_3 as Arppp
+FROM abion_17
+WHERE abion_17.ref = 'PNe_2020'
+""", con=db)
+    db.close()
+    res['Hep_pp'] = np.log10(res.Hep / res.Hepp)
+    res['Op_pp'] = np.log10(res.Op / res.Opp)
+    res['Sp_pp'] = np.log10(res.Sp / res.Spp)
+    res['Clpp_ppp'] = np.log10(res.Clpp / res.Clppp)
+    res['Arpp_ppp'] = np.log10(res.Arpp / res.Arppp)
+    
+    res.to_csv('PN2020_3MdB_MUSE.csv.gz')
+    
 #%% Pipeline
 class PipeLine(object):
     
@@ -281,7 +315,7 @@ class PipeLine(object):
         """
         
         
-    def load_obs(self, clean_error=1e-5):
+    def load_obs(self, clean_error=1e-5, mask=None):
         
         obs_name = Path(self.data_dir) / Path('{}_MUSE_b_*.fits'.format(self.obj_name))
         self.obs = pn.Observation(obs_name, fileFormat='fits_IFU', 
@@ -305,8 +339,8 @@ class PipeLine(object):
         err_int_dic = self.obs_int.getError(returnObs=True)
         for line in self.obs.getSortedLines():
             line.obsIntens *= self.flux_normalisation
-            mask = np.abs(line.obsError - self.err_default) < clean_error
-            line.obsIntens[mask] = np.nan
+            mask_err = np.abs(line.obsError - self.err_default) < clean_error
+            line.obsIntens[mask_err] = np.nan
             try:
                 line.obsIntens[0] = obs_int_dic[line.label][0]
                 line.obsError[0] = err_int_dic[line.label][0]
@@ -713,6 +747,88 @@ class PipeLine(object):
             self.abund_dic = pickle.load(handle)
         self.log_.message('Done', calling='Pipeline.read_abunds')
 
+
+    def predict_ICF_ML(self, N_train=5, tol=0.5, learning_rate=0.600, max_depth=14, n_estimators=100):
+        
+        try:
+            df = pd.read_csv('PN2020_3MdB_MUSE.csv.gz')
+        except:
+            get_ICFs_3MdB()
+            df = pd.read_csv('PN2020_3MdB_MUSE.csv.gz')
+            
+        get_ab = lambda label: self.abund_dic[label][0]
+                
+        Hepp_p = get_ab('He2r_4686A')/get_ab('He1r_6678A')
+        Opp_p = get_ab('O3_4959A')/get_ab('O2_7330A+')
+        Spp_p = get_ab('S3_9069A')/get_ab('S2_6731A')
+        Clppp_pp = get_ab('Cl4_8046A')/get_ab('Cl3_5538A')
+        Arppp_pp = get_ab('Ar4_4740A')/get_ab('Ar3_7751A')
+        
+        mask1 = np.abs( ( np.log10(df['Hepp'] / df['Hep']) - np.log10(Hepp_p) ) ) < tol
+        mask2 = np.abs( ( np.log10(df['Opp'] / df['Op']) - np.log10(Opp_p) ) ) < tol
+        mask3 = np.abs( ( np.log10(df['Spp'] / df['Sp']) - np.log10(Spp_p) ) ) < tol
+        mask4 = np.abs( ( np.log10(df['Clppp'] / df['Clpp']) - np.log10(Clppp_pp) ) ) < tol
+        mask5 = np.abs( ( np.log10(df['Arppp'] / df['Arpp']) - np.log10(Arppp_pp) ) ) < tol
+
+                
+        mask = mask1 & mask2 & mask3 & mask4 
+        if N_train == 5:
+            mask = mask & mask5
+        print('mask 1: {}, mask 2:{}, mask 3:{}, mask 4:{},, mask 5:{}, mask:{}'.format(mask1.sum(), 
+                                                                                        mask2.sum(), 
+                                                                                        mask3.sum(),
+                                                                                        mask4.sum(),
+                                                                                        mask5.sum(),
+                                                                                        mask.sum()))
+        if N_train == 4:
+            X_train=np.array((df['Hepp'][mask]/df['Hep'][mask],
+                              df['Opp'][mask]/df['Op'][mask], 
+                              df['Spp'][mask]/df['Sp'][mask], 
+                              df['Clppp'][mask]/df['Clpp'][mask])).T     
+        
+        elif N_train == 5:
+            X_train=np.array((df['Hepp'][mask]/df['Hep'][mask],
+                              df['Opp'][mask]/df['Op'][mask], 
+                              df['Spp'][mask]/df['Sp'][mask], 
+                              df['Clppp'][mask]/df['Clpp'][mask],
+                              df['Arppp'][mask]/df['Arpp'][mask])).T     
+               
+        icf_c = (1./(df['Cp'][mask]))
+        icf_n = (1./(df['Np'][mask]))
+        icf_o = (1./(df['Op'][mask]+df['Opp'][mask]))
+        icf_s = (1./(df['Sp'][mask]+df['Spp'][mask]))
+        icf_cl = (1./(df['Clpp'][mask]+df['Clppp'][mask]))
+        icf_ar = (1./(df['Arpp'][mask]+df['Arppp'][mask]))
+        
+        y_train = np.log10(np.array((icf_c, icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
+        
+        RM = manage_RM(RM_type='XGB',
+                              X_train=X_train, 
+                              y_train=y_train, 
+                              scaling=True,
+                              scaling_y=False,
+                              use_log=True,
+                              verbose=True, 
+                              random_seed=42,
+                              split_ratio=0.2, 
+                              clear_session=True,
+                              pca_N=0)
+        RM.init_RM(learning_rate=learning_rate, max_depth=max_depth, n_estimators=n_estimators)
+        RM.train_RM()
+        
+        if N_train == 4:
+            RM.set_test(X = np.expand_dims(np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp)), 0))            
+        elif N_train == 5:
+            RM.set_test(X = np.expand_dims(np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp, Arppp_pp)), 0))
+        RM.predict()
+        self.RM = RM
+        self.ICF_ML = {'C+': 10**RM.pred[0][0],
+                       'N+': 10**RM.pred[0][1],
+                       'O+ + O++': 10**RM.pred[0][2],
+                       'S+ + S++': 10**RM.pred[0][3],
+                       'Cl2+ + Cl3+': 10**RM.pred[0][4],
+                       'Ar2+ + Ar3+': 10**RM.pred[0][5]}
+                       
     
 #%% run pipeline and all
 
@@ -740,7 +856,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=None):
     print('Number of lines , valid ones: ', PL.obs.n_lines,PL.obs.n_valid_lines)
     
     PL.obs.def_EBV()
-    PL.red_cor_obs(EBV_min = 0., plot_=False)    
+    PL.red_cor_obs(EBV_min = 0., plot_=False)#, label1="H1r_6561.0", label2="H1r_4860.0")    
 
     PL.correc_NII(Te_corr)
     PL.correc_OII(Te_corr, rec_label='O2r_4649.13A')    
