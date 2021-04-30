@@ -748,7 +748,7 @@ class PipeLine(object):
         self.log_.message('Done', calling='Pipeline.read_abunds')
 
 
-    def predict_ICF_ML(self, N_train=5, tol=0.5, learning_rate=0.600, max_depth=14, n_estimators=100):
+    def define_ICF_ML(self, N_train=5, tol=0.5, learning_rate=0.600, max_depth=14, n_estimators=100):
         
         try:
             df = pd.read_csv('PN2020_3MdB_MUSE.csv.gz')
@@ -770,7 +770,7 @@ class PipeLine(object):
         mask4 = np.abs( ( np.log10(df['Clppp'] / df['Clpp']) - np.log10(Clppp_pp) ) ) < tol
         mask5 = np.abs( ( np.log10(df['Arppp'] / df['Arpp']) - np.log10(Arppp_pp) ) ) < tol
 
-                
+        self.N_train = N_train
         mask = mask1 & mask2 & mask3 & mask4 
         if N_train == 5:
             mask = mask & mask5
@@ -815,20 +815,42 @@ class PipeLine(object):
                               pca_N=0)
         RM.init_RM(learning_rate=learning_rate, max_depth=max_depth, n_estimators=n_estimators)
         RM.train_RM()
-        
-        if N_train == 4:
-            RM.set_test(X = np.expand_dims(np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp)), 0))            
-        elif N_train == 5:
-            RM.set_test(X = np.expand_dims(np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp, Arppp_pp)), 0))
-        RM.predict()
         self.RM = RM
-        self.ICF_ML = {'C+': 10**RM.pred[0][0],
-                       'N+': 10**RM.pred[0][1],
-                       'O+ + O++': 10**RM.pred[0][2],
-                       'S+ + S++': 10**RM.pred[0][3],
-                       'Cl2+ + Cl3+': 10**RM.pred[0][4],
-                       'Ar2+ + Ar3+': 10**RM.pred[0][5]}
+        
+    def predict_ICF_ML(self):
+
+        get_ab = lambda label: self.abund_dic[label][0]
+        Hepp_p = get_ab('He2r_4686A')/get_ab('He1r_6678A')
+        Opp_p = get_ab('O3_4959A')/get_ab('O2_7330A+')
+        Spp_p = get_ab('S3_9069A')/get_ab('S2_6731A')
+        Clppp_pp = get_ab('Cl4_8046A')/get_ab('Cl3_5538A')
+        Arppp_pp = get_ab('Ar4_4740A')/get_ab('Ar3_7751A')
+
+        if self.N_train == 4:
+            self.RM.set_test(X = np.expand_dims(np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp)), 0))            
+        elif self.N_train == 5:
+            self.RM.set_test(X = np.expand_dims(np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp, Arppp_pp)), 0))
+        self.RM.predict()
+        self.ICF_ML = {'C+': 10**self.RM.pred[0][0],
+                       'N+': 10**self.RM.pred[0][1],
+                       'O+ + O++': 10**self.RM.pred[0][2],
+                       'S+ + S++': 10**self.RM.pred[0][3],
+                       'Cl2+ + Cl3+': 10**self.RM.pred[0][4],
+                       'Ar2+ + Ar3+': 10**self.RM.pred[0][5]}
                        
+    def plot_RM(self):
+        self.RM.predict()
+        if self.RM.N_out > 1:
+            f, axes = plt.subplots(3, 2, figsize=(7, 11))
+            for i in np.arange(self.RM.N_out):
+                ax = axes.ravel()[i]
+                y_test = self.RM.y_test_ori[self.RM.isfin,i]
+                pred = self.RM.pred[:,i]
+                std = np.sqrt(np.sum((y_test - pred)**2 )/len(y_test))
+                im = ax.scatter(y_test, pred, alpha=0.1, marker='.', rasterized=True)
+                ax.plot([np.min(y_test), np.max(y_test)], [np.min(y_test), np.max(y_test)], c='r')
+                ax.set_title(r'STD = {:.2e}'.format(std))
+            f.tight_layout()
     
 #%% run pipeline and all
 
