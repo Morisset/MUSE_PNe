@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Created on Tue Apr  6 09:49:26 2021
@@ -7,11 +7,15 @@ Created on Tue Apr  6 09:49:26 2021
 """
 
 
+import os
+import pickle
+import gzip
+import pymysql
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import pyneb as pn
 from pyneb.utils.misc import parseAtom, int_to_roman
-pn.config.use_multiprocs()
 from pathlib import Path
 from scipy.interpolate import interp1d
 import pandas as pd
@@ -20,10 +24,7 @@ try:
     AI4NEB_INSTALLED = True
 except:
     AI4NEB_INSTALLED = False
-import os
-import pickle
-import gzip
-import pymysql
+
 
 #%% Define dictionnaries hektor to pyneb
 l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
@@ -855,7 +856,9 @@ class PipeLine(object):
 #%% run pipeline and all
 
 def run_pipeline(obj_name, Te_corr, random_seed=None):
-        
+    
+    if Te_corr < 1:
+        Te_corr = None
     data_dir = Path(os.environ['MUSE_DATA']) / Path('{}/maps'.format(obj_name))
 
     PL = PipeLine(data_dir = data_dir,
@@ -916,3 +919,7 @@ def run_all():
     for obj_name in ('M142', ): #'HF22','NGC6778','M142', 
         for Te_corr in (None, 3000, 8000):
             run_pipeline(obj_name, Te_corr, random_seed=42)
+
+
+if __name__ == "__main__":
+    run_pipeline(sys.argv[1], int(sys.argv[2]), random_seed=42)
