@@ -749,7 +749,7 @@ class PipeLine(object):
         self.log_.message('Done', calling='Pipeline.read_abunds')
 
 
-    def define_ICF_ML(self, N_train=5, tol=0.5, learning_rate=0.600, max_depth=14, n_estimators=100):
+    def define_ICF_ML(self, N_X=5, N_y=5, tol=0.5, learning_rate=0.600, max_depth=14, n_estimators=100):
         
         try:
             df = pd.read_csv('PN2020_3MdB_MUSE.csv.gz')
@@ -771,23 +771,24 @@ class PipeLine(object):
         mask4 = np.abs( ( np.log10(df['Clppp'] / df['Clpp']) - np.log10(Clppp_pp) ) ) < tol
         mask5 = np.abs( ( np.log10(df['Arppp'] / df['Arpp']) - np.log10(Arppp_pp) ) ) < tol
 
-        self.N_train = N_train
+        self.N_X = N_X
+        self.N_y = N_y
         mask = mask1 & mask2 & mask3 & mask4 
-        if N_train == 5:
+        if N_X == 5:
             mask = mask & mask5
-        print('mask 1: {}, mask 2:{}, mask 3:{}, mask 4:{},, mask 5:{}, mask:{}'.format(mask1.sum(), 
+        print('mask 1: {}, mask 2:{}, mask 3:{}, mask 4:{}, mask 5:{}, mask:{}'.format(mask1.sum(), 
                                                                                         mask2.sum(), 
                                                                                         mask3.sum(),
                                                                                         mask4.sum(),
                                                                                         mask5.sum(),
                                                                                         mask.sum()))
-        if N_train == 4:
+        if N_X == 4:
             X_train=np.array((df['Hepp'][mask]/df['Hep'][mask],
                               df['Opp'][mask]/df['Op'][mask], 
                               df['Spp'][mask]/df['Sp'][mask], 
                               df['Clppp'][mask]/df['Clpp'][mask])).T     
         
-        elif N_train == 5:
+        elif N_X == 5:
             X_train=np.array((df['Hepp'][mask]/df['Hep'][mask],
                               df['Opp'][mask]/df['Op'][mask], 
                               df['Spp'][mask]/df['Sp'][mask], 
@@ -801,8 +802,10 @@ class PipeLine(object):
         icf_cl = (1./(df['Clpp'][mask]+df['Clppp'][mask]))
         icf_ar = (1./(df['Arpp'][mask]+df['Arppp'][mask]))
         
-        y_train = np.log10(np.array((icf_c, icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
-        
+        if self.N_y == 5:
+            y_train = np.log10(np.array((icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
+        elif self.N_y == 6:
+            y_train = np.log10(np.array((icf_c, icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
         RM = manage_RM(RM_type='XGB',
                               X_train=X_train, 
                               y_train=y_train, 
@@ -819,27 +822,37 @@ class PipeLine(object):
         self.RM = RM
         
     def predict_ICF_ML(self):
-
-        get_ab = lambda label: self.abund_dic[label][0]
+    
+        get_ab = lambda label: self.obs.reshape(self.abund_dic[label])[0,0,:]
         Hepp_p = get_ab('He2r_4686A')/get_ab('He1r_6678A')
         Opp_p = get_ab('O3_4959A')/get_ab('O2_7330A+')
         Spp_p = get_ab('S3_9069A')/get_ab('S2_6731A')
         Clppp_pp = get_ab('Cl4_8046A')/get_ab('Cl3_5538A')
         Arppp_pp = get_ab('Ar4_4740A')/get_ab('Ar3_7751A')
-
-        if self.N_train == 4:
-            self.RM.set_test(X = np.expand_dims(np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp)), 0))            
-        elif self.N_train == 5:
-            self.RM.set_test(X = np.expand_dims(np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp, Arppp_pp)), 0))
+    
+        if self.N_X == 4:
+            self.RM.set_test(X = np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp)).T)            
+        elif self.N_X == 5:
+            self.RM.set_test(X = np.array((Hepp_p, Opp_p, Spp_p, Clppp_pp, Arppp_pp)).T)
         self.RM.predict()
-        self.ICF_ML = {'C+': 10**self.RM.pred[0][0],
-                       'N+': 10**self.RM.pred[0][1],
-                       'O+ + O++': 10**self.RM.pred[0][2],
-                       'S+ + S++': 10**self.RM.pred[0][3],
-                       'Cl2+ + Cl3+': 10**self.RM.pred[0][4],
-                       'Ar2+ + Ar3+': 10**self.RM.pred[0][5]}
-                       
-    def plot_RM(self):
+        ICFs = np.ones((self.N_MC+1, self.N_y)) * np.nan
+        for i_y in np.arange(self.N_y):
+            ICFs[:,i_y][self.RM.isfin] =  10**self.RM.pred[:,i_y]
+        if self.N_y == 5:
+            self.ICF_ML = {'N+': ICFs[:,0],
+                           'O+ + O++': ICFs[:,1],
+                           'S+ + S++': ICFs[:,2],
+                           'Cl2+ + Cl3+': ICFs[:,3],
+                           'Ar2+ + Ar3+': ICFs[:,4]}
+        elif self.N_y == 6:
+            self.ICF_ML = {'C+': ICFs[:,0],
+                           'N+': ICFs[:,1],
+                           'O+ + O++': ICFs[:,2],
+                           'S+ + S++': ICFs[:,3],
+                           'Cl2+ + Cl3+': ICFs[:,4],
+                           'Ar2+ + Ar3+': ICFs[:,5]}
+                           
+    def plot_ML(self):
         self.RM.predict()
         if self.RM.N_out > 1:
             f, axes = plt.subplots(3, 2, figsize=(7, 11))
@@ -852,6 +865,51 @@ class PipeLine(object):
                 ax.plot([np.min(y_test), np.max(y_test)], [np.min(y_test), np.max(y_test)], c='r')
                 ax.set_title(r'STD = {:.2e}'.format(std))
             f.tight_layout()
+    
+    def set_abunds_elem_PyNeb(self):
+        get_ab = lambda label: self.obs.reshape(self.abund_dic[label])[0,0,:]
+        
+        
+        self.atom_abun = {'He2' : np.mean((get_ab('He1r_4713A'), get_ab('He1r_6678A'), get_ab('He1r_7281A')), 0),
+                          'He3' : get_ab('He2r_4686A'),
+                          'N2' : get_ab('N2_6548A'),
+                          'O2' : np.mean((get_ab('O2_7319A+'), get_ab('O2_7330A+')), 0),
+                          'O3' : get_ab('O3_4959A'),
+                          'S2' : np.mean((get_ab('S2_6716A'), get_ab('S2_6731A')), 0),
+                          'S3' : get_ab('S3_6312A'),
+                          'Cl3' : np.mean((get_ab('Cl3_5518A'), get_ab('Cl3_5538A')), 0),
+                          'Cl4' : get_ab('Cl4_7531A'),
+                          'Ar3' : get_ab('Ar3_7136A'),
+                          'Ar4' : get_ab('Ar4_4740A')}
+        self.icf = pn.ICF()
+        self.elem_abun = self.icf.getElemAbundance(self.atom_abun)
+    
+    def set_abunds_elem_ML(self):
+        
+        self.elem_abun_ML = {}
+        self.elem_abun_ML['He'] = self.atom_abun['He2'] + self.atom_abun['He3']
+        self.elem_abun_ML['N'] = self.atom_abun['N2'] * self.ICF_ML['N+']
+        self.elem_abun_ML['O'] =  (self.atom_abun['O2'] + self.atom_abun['O3']) * self.ICF_ML['O+ + O++']
+        self.elem_abun_ML['S'] =  (self.atom_abun['S2'] + self.atom_abun['S3']) * self.ICF_ML['S+ + S++']
+        self.elem_abun_ML['Cl'] = (self.atom_abun['Cl3'] + self.atom_abun['Cl4']) * self.ICF_ML['Cl2+ + Cl3+']
+        self.elem_abun_ML['Ar'] = (self.atom_abun['Ar3'] + self.atom_abun['Ar4']) * self.ICF_ML['Ar2+ + Ar3+']
+        
+    def print_abunds(self):
+        
+        for elem in self.elem_abun_ML:
+            ab_ML = 12 + np.log10(self.elem_abun_ML[elem])
+            print('{:.2s} ML this work : {:.2f} +/- {:.2f}'.format(elem, ab_ML[0], np.nanstd(ab_ML)))
+            icfs = self.icf.getAvailableICFs()[elem]
+            for k in icfs:
+                if isinstance(self.elem_abun[k], np.ndarray):
+                    if len(self.elem_abun[k]) > 1:
+                        if not np.isnan(self.elem_abun[k][0]):
+                            ab = 12 + np.log10(self.elem_abun[k])
+                            print('{:.2s} {:20s} : {:.2f} +/- {:.2f}'.format(elem, 
+                                                                             k, 
+                                                                             ab[0] , 
+                                                                             np.nanstd(ab)))
+            
     
 #%% run pipeline and all
 
