@@ -660,6 +660,28 @@ class PipeLine(object):
                     self.abund_dic[line.label] = None
                 self.log_.message('Abund from {} done.'.format(line.label), calling='PipeLine.set_abunds')
 
+    def print_ionic(self, tex_filename):
+        
+        with open(tex_filename, 'w') as f:
+            for line in self.obs.getSortedLines(crit='mass'):
+                if line.is_valid:
+                    tit = get_label_str(line.label)
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        ab_3D = self.obs.reshape(self.abund_dic[line.label])
+                        ab_int = 12 + np.log10(ab_3D[0,0,0])
+                        std_int = np.nanstd(np.log10(ab_3D[0,0,:]))
+                        """
+                        ab = 12 + np.log10(np.nanmedian((ab_3D[:,:,0])[~maskHb]))
+                        maskinf = np.isfinite(np.log10(ab_3D[:,:,0])[~maskHb])
+                        std_spa = np.nanstd(np.log10(ab_3D[:,:,0])[~maskHb][maskinf])
+                        ab2 = 12 + (np.nansum((np.log10(ab_3D[:,:,0]) * PL.get_image(label='H1r_4861A', type_='orig'))[~maskHb][maskinf]) / 
+                                           np.nansum(PL.get_image(label='H1r_4861A', type_='orig')[~maskHb][maskinf]))
+                        std2 = (np.nansum((np.nanstd(np.log10(ab_3D),2) * PL.get_image(label='H1r_4861A', type_='orig'))[~maskHb][maskinf]) / 
+                                           np.nansum(PL.get_image(label='H1r_4861A', type_='orig')[~maskHb][maskinf]))
+                        """
+                    to_print = '{:15s} & {:5.2f} $\pm$ {:4.2f} \\\\'.format(tit, ab_int, std_int)
+                    print(to_print)
+                    f.write(to_print + '\n')
         
     def correc_NII(self, tem, den=1e3):
         
@@ -894,22 +916,33 @@ class PipeLine(object):
         self.elem_abun_ML['Cl'] = (self.atom_abun['Cl3'] + self.atom_abun['Cl4']) * self.ICF_ML['Cl2+ + Cl3+']
         self.elem_abun_ML['Ar'] = (self.atom_abun['Ar3'] + self.atom_abun['Ar4']) * self.ICF_ML['Ar2+ + Ar3+']
         
-    def print_abunds(self):
+    def print_abunds_elem(self, tex_filename, print_rules=False):
         
-        for elem in self.elem_abun_ML:
-            ab_ML = 12 + np.log10(self.elem_abun_ML[elem])
-            print('{:.2s} ML this work : {:.2f} +/- {:.2f}'.format(elem, ab_ML[0], np.nanstd(ab_ML)))
-            icfs = self.icf.getAvailableICFs()[elem]
-            for k in icfs:
-                if isinstance(self.elem_abun[k], np.ndarray):
-                    if len(self.elem_abun[k]) > 1:
-                        if not np.isnan(self.elem_abun[k][0]):
-                            ab = 12 + np.log10(self.elem_abun[k])
-                            print('{:.2s} {:20s} : {:.2f} +/- {:.2f}'.format(elem, 
-                                                                             k, 
-                                                                             ab[0] , 
-                                                                             np.nanstd(ab)))
-            
+        with open(tex_filename, 'w') as f:
+            for elem in self.elem_abun_ML:
+                print('============= {} ============='.format(elem))
+                f.write('   {}/H        &                    &      \\\\ \n'.format(elem))
+                ab_ML = 12 + np.log10(self.elem_abun_ML[elem])
+                to_print = '{:5.2f} +/- {:.2f} & ML this work       & \\\\'.format(ab_ML[0], np.nanstd(ab_ML))
+                print(to_print)
+                f.write(to_print + '\n')
+                icfs = self.icf.getAvailableICFs()[elem]
+                for k in icfs:
+                    if isinstance(self.elem_abun[k], np.ndarray) and self.icf.all_icfs[k]['type'] in ('PNe', 'All'):
+                        if len(self.elem_abun[k]) > 1:
+                            if not np.isnan(self.elem_abun[k][0]):
+                                ab = 12 + np.log10(self.elem_abun[k])
+                                if print_rules:
+                                    rule = self.icf.getExpression(k)
+                                else:
+                                    rule = ''
+                                to_print = '{:5.2f} +/- {:.2f} & {:18s} & {} \\\\'.format(ab[0] , 
+                                                                                          np.nanstd(ab),
+                                                                                          k,
+                                                                                          rule)
+                                print(to_print)
+                                f.write(to_print + '\n')
+                    
     
 #%% run pipeline and all
 
