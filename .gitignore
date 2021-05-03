@@ -128,7 +128,7 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-*.ai4neb_sk
+*.ai4neb*
 *.pickle
 *.tgz
 *.pickle.gz
