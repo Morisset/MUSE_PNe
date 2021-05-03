@@ -243,6 +243,7 @@ A_HELIUM_vol_1 as Hep,
 A_HELIUM_vol_2 as Hepp,
 A_CARBON_vol_1 as Cp,
 A_NITROGEN_vol_1 as Np,
+A_NITROGEN_vol_2 as Npp,
 A_OXYGEN_vol_1 as Op,
 A_OXYGEN_vol_2 as Opp,
 A_SULPHUR_vol_1 as Sp,
@@ -256,6 +257,7 @@ WHERE abion_17.ref = 'PNe_2020'
 """, con=db)
     db.close()
     res['Hep_pp'] = np.log10(res.Hep / res.Hepp)
+    res['Np_pp'] = np.log10(res.Np / res.Npp)
     res['Op_pp'] = np.log10(res.Op / res.Opp)
     res['Sp_pp'] = np.log10(res.Sp / res.Spp)
     res['Clpp_ppp'] = np.log10(res.Clpp / res.Clppp)
@@ -273,7 +275,9 @@ class PipeLine(object):
                  err_default=0.0,
                  flux_normalisation=1.0,
                  cmap='viridis', 
-                 random_seed=None):
+                 random_seed=None, 
+                 Cutout2D_position=None, 
+                 Cutout2D_size=None):
         """
 
 
@@ -296,27 +300,27 @@ class PipeLine(object):
         self.atom_dic  = {}
         self.abund_dic =  {}
         self.cmap = cmap
-        np.random.seed(random_seed)
+        self.RM_filename = 'ICFs_{}'.format(self.obj_name)
+        self.random_seed = random_seed
+        np.random.seed(self.random_seed)
         self.ANN_inst_kwargs = {'RM_type' : 'SK_ANN', 
                                 'verbose' : False, 
                                 'scaling' : True,
                                 'use_log' : False,
-                                'random_seed' : None
+                                'random_seed' : self.random_seed
                                 }
         self.ANN_init_kwargs = {'solver' : 'lbfgs', 
                                 'activation' : 'tanh', 
                                 'hidden_layer_sizes' : (10, 10), 
                                 'max_iter' : 20000
                                 }
-        self.flux_normalisation = flux_normalisation
-        self.load_obs()
-        """
-        self.add_MC(N_MC)
-        self.red_cor_obs()
-        """
+        self.flux_normalisation = flux_normalisation        
+        self.load_obs(Cutout2D_position=Cutout2D_position, Cutout2D_size=Cutout2D_size)
         
         
-    def load_obs(self, clean_error=1e-5, mask=None):
+    def load_obs(self, clean_error=1e-5, 
+                 Cutout2D_position=None, 
+                 Cutout2D_size=None):
         
         obs_name = Path(self.data_dir) / Path('{}_MUSE_b_*.fits'.format(self.obj_name))
         self.obs = pn.Observation(obs_name, fileFormat='fits_IFU', 
@@ -324,9 +328,9 @@ class PipeLine(object):
                                   errStr=self.error_str, 
                                   errIsRelative=False,
                                   err_default=self.err_default,
-                                  addErrDefault = True)
-        
-        
+                                  addErrDefault = True, 
+                                  Cutout2D_position=Cutout2D_position, 
+                                  Cutout2D_size=Cutout2D_size)
         int_file = Path(self.data_dir) / Path('{}_int_line_fluxes.dat'.format(self.obj_name))
         self.obs_int = pn.Observation(int_file, fileFormat='lines_in_rows_err_cols',
                                       corrected = False, 
@@ -335,7 +339,7 @@ class PipeLine(object):
                                       addErrDefault = True)
         
         for line in self.obs_int.getSortedLines():
-            line.obsIntens *= self.flux_normalisation / self.obs.n_obs
+            line.obsIntens *= self.flux_normalisation / self.obs.origin_fits_shape[0] / self.obs.origin_fits_shape[1]
         obs_int_dic = self.obs_int.getIntens(returnObs=True)
         err_int_dic = self.obs_int.getError(returnObs=True)
         for line in self.obs.getSortedLines():
@@ -357,7 +361,7 @@ class PipeLine(object):
         
         if not self.MC_done:
             if N_MC is not None:
-                self.obs.addMonteCarloObs(N_MC)
+                self.obs.addMonteCarloObs(N_MC, random_seed = self.random_seed)
                 self.MC_done = True
                 self.N_MC = self.obs.N_MC
                 self.n_obs = self.obs.n_obs
@@ -616,12 +620,15 @@ class PipeLine(object):
         
         self._train_ML_PJ()
         mask = np.isfinite(PJ_HI) & np.isfinite(log_den) & np.isfinite(Hep)
-        self.ANN.set_test(np.array((PJ_HI[mask], log_den[mask], Hep[mask])).T)
-        
-        self.ANN.predict()
-        pred = np.zeros_like(log_den) * np.nan
-        pred[mask] = self.ANN.pred
-        self.TeNe['PJ_ANN']['Te'] = 10**pred
+        if mask.sum() == 0:
+            self.TeNe['PJ_ANN']['Te'] = np.ones_like(Hep) * np.nan
+        else:
+            self.ANN.set_test(np.array((PJ_HI[mask], log_den[mask], Hep[mask])).T)
+            
+            self.ANN.predict()
+            pred = np.zeros_like(log_den) * np.nan
+            pred[mask] = self.ANN.pred
+            self.TeNe['PJ_ANN']['Te'] = 10**pred
         self.log_.message('Done', calling='Pipeline.add_T_PJ_ML')
         
             
@@ -771,76 +778,93 @@ class PipeLine(object):
         self.log_.message('Done', calling='Pipeline.read_abunds')
 
 
-    def define_ICF_ML(self, N_X=5, N_y=5, tol=0.5, learning_rate=0.600, max_depth=14, n_estimators=100):
+    def define_ICF_ML(self, N_X=5, N_y=5, tol=0.5, retrain=False,
+                      learning_rate=0.600, max_depth=14, n_estimators=100,
+                      RM_type='XGB', save_RM=True):
         
-        try:
-            df = pd.read_csv('PN2020_3MdB_MUSE.csv.gz')
-        except:
-            get_ICFs_3MdB()
-            df = pd.read_csv('PN2020_3MdB_MUSE.csv.gz')
-            
-        get_ab = lambda label: self.abund_dic[label][0]
-                
-        Hepp_p = get_ab('He2r_4686A')/get_ab('He1r_6678A')
-        Opp_p = get_ab('O3_4959A')/get_ab('O2_7330A+')
-        Spp_p = get_ab('S3_9069A')/get_ab('S2_6731A')
-        Clppp_pp = get_ab('Cl4_8046A')/get_ab('Cl3_5538A')
-        Arppp_pp = get_ab('Ar4_4740A')/get_ab('Ar3_7751A')
-        
-        mask1 = np.abs( ( np.log10(df['Hepp'] / df['Hep']) - np.log10(Hepp_p) ) ) < tol
-        mask2 = np.abs( ( np.log10(df['Opp'] / df['Op']) - np.log10(Opp_p) ) ) < tol
-        mask3 = np.abs( ( np.log10(df['Spp'] / df['Sp']) - np.log10(Spp_p) ) ) < tol
-        mask4 = np.abs( ( np.log10(df['Clppp'] / df['Clpp']) - np.log10(Clppp_pp) ) ) < tol
-        mask5 = np.abs( ( np.log10(df['Arppp'] / df['Arpp']) - np.log10(Arppp_pp) ) ) < tol
-
         self.N_X = N_X
         self.N_y = N_y
-        mask = mask1 & mask2 & mask3 & mask4 
-        if N_X == 5:
-            mask = mask & mask5
-        print('mask 1: {}, mask 2:{}, mask 3:{}, mask 4:{}, mask 5:{}, mask:{}'.format(mask1.sum(), 
-                                                                                        mask2.sum(), 
-                                                                                        mask3.sum(),
-                                                                                        mask4.sum(),
-                                                                                        mask5.sum(),
-                                                                                        mask.sum()))
-        if N_X == 4:
-            X_train=np.array((df['Hepp'][mask]/df['Hep'][mask],
-                              df['Opp'][mask]/df['Op'][mask], 
-                              df['Spp'][mask]/df['Sp'][mask], 
-                              df['Clppp'][mask]/df['Clpp'][mask])).T     
-        
-        elif N_X == 5:
-            X_train=np.array((df['Hepp'][mask]/df['Hep'][mask],
-                              df['Opp'][mask]/df['Op'][mask], 
-                              df['Spp'][mask]/df['Sp'][mask], 
-                              df['Clppp'][mask]/df['Clpp'][mask],
-                              df['Arppp'][mask]/df['Arpp'][mask])).T     
-               
-        icf_c = (1./(df['Cp'][mask]))
-        icf_n = (1./(df['Np'][mask]))
-        icf_o = (1./(df['Op'][mask]+df['Opp'][mask]))
-        icf_s = (1./(df['Sp'][mask]+df['Spp'][mask]))
-        icf_cl = (1./(df['Clpp'][mask]+df['Clppp'][mask]))
-        icf_ar = (1./(df['Arpp'][mask]+df['Arppp'][mask]))
-        
-        if self.N_y == 5:
-            y_train = np.log10(np.array((icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
-        elif self.N_y == 6:
-            y_train = np.log10(np.array((icf_c, icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
-        RM = manage_RM(RM_type='XGB',
-                              X_train=X_train, 
-                              y_train=y_train, 
-                              scaling=True,
-                              scaling_y=False,
-                              use_log=True,
-                              verbose=True, 
-                              random_seed=42,
-                              split_ratio=0.2, 
-                              clear_session=True,
-                              pca_N=0)
-        RM.init_RM(learning_rate=learning_rate, max_depth=max_depth, n_estimators=n_estimators)
-        RM.train_RM()
+        RM = manage_RM(RM_filename=self.RM_filename, verbose = True)
+        if not RM.model_read or retrain:
+            try:
+                df = pd.read_csv('PN2020_3MdB_MUSE.csv.gz')
+            except:
+                get_ICFs_3MdB()
+                df = pd.read_csv('PN2020_3MdB_MUSE.csv.gz')
+                
+            get_ab = lambda label: self.abund_dic[label][0]
+                    
+            Hepp_p = get_ab('He2r_4686A')/get_ab('He1r_6678A')
+            Opp_p = get_ab('O3_4959A')/get_ab('O2_7330A+')
+            Spp_p = get_ab('S3_9069A')/get_ab('S2_6731A')
+            Clppp_pp = get_ab('Cl4_8046A')/get_ab('Cl3_5538A')
+            Arppp_pp = get_ab('Ar4_4740A')/get_ab('Ar3_7751A')
+            
+            mask1 = np.abs( ( np.log10(df['Hepp'] / df['Hep']) - np.log10(Hepp_p) ) ) < tol
+            mask2 = np.abs( ( np.log10(df['Opp'] / df['Op']) - np.log10(Opp_p) ) ) < tol
+            mask3 = np.abs( ( np.log10(df['Spp'] / df['Sp']) - np.log10(Spp_p) ) ) < tol
+            mask4 = np.abs( ( np.log10(df['Clppp'] / df['Clpp']) - np.log10(Clppp_pp) ) ) < tol
+            mask5 = np.abs( ( np.log10(df['Arppp'] / df['Arpp']) - np.log10(Arppp_pp) ) ) < tol
+    
+            mask = mask1 & mask2 & mask3 & mask4 
+            if N_X == 5:
+                mask = mask & mask5
+            print('mask 1: {}, mask 2:{}, mask 3:{}, mask 4:{}, mask 5:{}, mask:{}'.format(mask1.sum(), 
+                                                                                            mask2.sum(), 
+                                                                                            mask3.sum(),
+                                                                                            mask4.sum(),
+                                                                                            mask5.sum(),
+                                                                                            mask.sum()))
+            if N_X == 4:
+                X_train=np.array((df['Hepp'][mask]/df['Hep'][mask],
+                                  df['Opp'][mask]/df['Op'][mask], 
+                                  df['Spp'][mask]/df['Sp'][mask], 
+                                  df['Clppp'][mask]/df['Clpp'][mask])).T     
+            
+            elif N_X == 5:
+                X_train=np.array((df['Hepp'][mask]/df['Hep'][mask],
+                                  df['Opp'][mask]/df['Op'][mask], 
+                                  df['Spp'][mask]/df['Sp'][mask], 
+                                  df['Clppp'][mask]/df['Clpp'][mask],
+                                  df['Arppp'][mask]/df['Arpp'][mask])).T     
+                   
+            icf_c = (1./(df['Cp'][mask]))
+            icf_n = (1./(df['Np'][mask]))
+            icf_o = (1./(df['Op'][mask]+df['Opp'][mask]))
+            icf_s = (1./(df['Sp'][mask]+df['Spp'][mask]))
+            icf_cl = (1./(df['Clpp'][mask]+df['Clppp'][mask]))
+            icf_ar = (1./(df['Arpp'][mask]+df['Arppp'][mask]))
+            
+            if self.N_y == 5:
+                y_train = np.log10(np.array((icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
+            elif self.N_y == 6:
+                y_train = np.log10(np.array((icf_c, icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
+            RM = manage_RM(RM_type=RM_type,
+                           X_train=X_train, 
+                           y_train=y_train, 
+                           scaling=True,
+                           scaling_y=False,
+                           use_log=True,
+                           verbose=True, 
+                           random_seed=42,
+                           split_ratio=0.2, 
+                           clear_session=True,
+                           pca_N=0)
+            if RM_type == 'XGB':
+                RM.init_RM(learning_rate=learning_rate, 
+                           max_depth=max_depth, 
+                           n_estimators=n_estimators)
+            elif RM_type == 'SK_ANN':
+                RM.init_RM(solver = 'lbfgs', 
+                           activation = 'tanh', 
+                           hidden_layer_sizes = (10, 20, 10), alpha=1e-3,
+                           max_iter = 20000,
+                           tol=1e-7)
+            RM.train_RM()
+            if save_RM:
+                RM.save_RM(self.RM_filename, save_train = True, save_test = True)
+        else:
+            pass#RM.predict(scoring=True)            
         self.RM = RM
         
     def predict_ICF_ML(self):
@@ -892,7 +916,7 @@ class PipeLine(object):
         get_ab = lambda label: self.obs.reshape(self.abund_dic[label])[0,0,:]
         
         
-        self.atom_abun = {'He2' : np.mean((get_ab('He1r_4713A'), get_ab('He1r_6678A'), get_ab('He1r_7281A')), 0),
+        self.atom_abun = {'He2' : np.mean((get_ab('He1r_6678A'), get_ab('He1r_7281A')), 0),
                           'He3' : get_ab('He2r_4686A'),
                           'N2' : get_ab('N2_6548A'),
                           'O2' : np.mean((get_ab('O2_7319A+'), get_ab('O2_7330A+')), 0),
@@ -946,7 +970,9 @@ class PipeLine(object):
     
 #%% run pipeline and all
 
-def run_pipeline(obj_name, Te_corr, random_seed=None):
+def run_pipeline(obj_name, Te_corr, random_seed=None,
+                 Cutout2D_position=(80,80),
+                 Cutout2D_size=(10,10)):
     
     if Te_corr < 1:
         Te_corr = None
@@ -955,7 +981,9 @@ def run_pipeline(obj_name, Te_corr, random_seed=None):
     PL = PipeLine(data_dir = data_dir,
                   obj_name = obj_name, 
                   error_str='error', err_default=0.05,
-                  random_seed=random_seed)
+                  random_seed=random_seed,
+                  Cutout2D_position=Cutout2D_position,
+                  Cutout2D_size=Cutout2D_size)
 
     PL.log_.level=3
     
@@ -1001,8 +1029,8 @@ def run_pipeline(obj_name, Te_corr, random_seed=None):
     PL.add_T_PJ()
     PL.add_T_PJ_ML()
     
-    PL.save_TeNe('{}/PipelineResults/{}_{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr))
-    PL.save_abunds('{}/PipelineResults/{}_{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr))
+    PL.save_TeNe('{}/PipelineResults/{}_{}_C2D_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr))
+    PL.save_abunds('{}/PipelineResults/{}_{}_C2D_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr))
     
         
 def run_all():
