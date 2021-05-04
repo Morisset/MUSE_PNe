@@ -315,9 +315,10 @@ class PipeLine(object):
                                 }
         self.ANN_init_kwargs = {'solver' : 'lbfgs', 
                                 'activation' : 'tanh', 
-                                'hidden_layer_sizes' : (10, 10), 
+                                'hidden_layer_sizes' : (10, 20, 10), 
                                 'max_iter' : 20000
                                 }
+
         self.flux_normalisation = flux_normalisation        
         self.load_obs(Cutout2D_position=Cutout2D_position, Cutout2D_size=Cutout2D_size)
         
@@ -527,7 +528,8 @@ class PipeLine(object):
     def make_diags(self, use_ANN=True):
         
         self.diags = pn.Diagnostics()
-        self.diags.ANN_inst_kwargs['verbose']=True
+        self.diags.ANN_inst_kwargs = self.ANN_inst_kwargs
+        self.diags.ANN_init_kwargs = self.ANN_init_kwargs
         self.diags.addDiagsFromObs(self.obs)       
         
         
@@ -997,8 +999,8 @@ class PipeLine(object):
     
 #%% run pipeline and all
 
-def run_pipeline(obj_name, Te_corr, random_seed=None,
-                 Cutout2D_position=None,#(80,80),
+def run_pipeline(obj_name, Te_corr, random_seed=42,
+                 Cutout2D_position=(80,80),
                  Cutout2D_size=(10,10)):
     
     if Te_corr < 1:
@@ -1041,13 +1043,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=None,
     PL.correc_OII(Te_corr, rec_label='O2r_4649.13A')    
     
     PL.make_diags()    
-    
-    PL.diags.ANN_inst_kwargs['verbose']=True
-    PL.diags.ANN_init_kwargs['activation']='tanh' #identity’, ‘logistic’, ‘tanh’, ‘relu’
-    PL.diags.ANN_init_kwargs['solver']= 'lbfgs' #‘lbfgs’, ‘sgd’, ‘adam’
-    PL.diags.ANN_init_kwargs['hidden_layer_sizes'] = (10, 20, 10)
-    
-    print(PL.n_obs)
+        
     pn.log_.timer('Starting', quiet=True)
     with np.errstate(divide='ignore', invalid='ignore'):
         PL.add_gCTD('N2S2', '[NII] 5755/6548', '[SII] 6731/6716')
@@ -1078,4 +1074,6 @@ def run_all():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
+        if sys.argv[2] is None:
+            sys.argv[2] = 0
         run_pipeline(sys.argv[1], int(sys.argv[2]), random_seed=42)
