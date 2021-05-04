@@ -26,6 +26,10 @@ except:
     AI4NEB_INSTALLED = False
 
 
+def print2(to_print, f):
+    print(to_print)
+    f.write(to_print + '\n')
+
 #%% Define dictionnaries hektor to pyneb
 l_dics = {'NGC6778': {'4641.0' : ('N', 3, '4641A', 1),
                       '4651.0' : ('O', 2, '4649.13A', 1),
@@ -352,8 +356,6 @@ class PipeLine(object):
             except:
                 self.log_.warn('Integrated value for {} not done'.format(line.label),
                                 calling='PipeLine.load_obs')
-            
-        
         
         self.n_obs = self.obs.n_obs
         
@@ -393,12 +395,29 @@ class PipeLine(object):
     def red_cor_obs(self, EBV_min=None, plot_=True, label1="H1r_6563A", label2="H1r_4861A", r_theo=2.85,
                     **kwargs):
         
-        self.obs.def_EBV(label1=label1, label2=label2, r_theo=r_theo)
+        try:
+            test = r_theo[0]
+            r_theo_is_iterable = True
+        except:
+            r_theo_is_iterable = False
+        
+        if r_theo_is_iterable:
+            EBV = []
+            for l1, r in zip(label1, r_theo):
+                self.obs.def_EBV(label1=l1, label2=label2, r_theo=r)
+                EBV.append(self.obs.extinction.E_BV)
+            self.obs.extinction.E_BV = np.nanmedian(EBV, 0)       
+        else:
+            self.obs.def_EBV(label1=label1, label2=label2, r_theo=r_theo)
+            
         if EBV_min is not None:
             mask = self.obs.extinction.E_BV < EBV_min
             pn.log_.message('number of spaxels with EBV < {} : {}'.format(EBV_min, mask.sum()),
                             calling='PipeLine.red_cor_obs')
             self.obs.extinction.E_BV[mask] = 0.
+        
+        
+        
         self.obs.correctData()
         if plot_:
             self.plot(data=self.obs.extinction.cHbeta, **kwargs)
@@ -615,57 +634,69 @@ class PipeLine(object):
     
         with np.errstate(divide='ignore', invalid='ignore'):
             PJ_HI = (C_8100 - C_8400) /  HI
+            PJ_HI[PJ_HI == 0] = np.nan
             log_den = np.log10(self.TeNe['N2S2']['Ne'])
-        Hep = 0.1 * (self.abund_dic['He1r_6678A'] / (self.abund_dic['He1r_6678A'] + self.abund_dic['He2r_4686A']))
+            Hep = 0.1 * (self.abund_dic['He1r_6678A'] / (self.abund_dic['He1r_6678A'] + self.abund_dic['He2r_4686A']))
         
         self._train_ML_PJ()
         mask = np.isfinite(PJ_HI) & np.isfinite(log_den) & np.isfinite(Hep)
-        if mask.sum() == 0:
+        if mask.sum() == 0: # Not even one value if finite
             self.TeNe['PJ_ANN']['Te'] = np.ones_like(Hep) * np.nan
         else:
-            self.ANN.set_test(np.array((PJ_HI[mask], log_den[mask], Hep[mask])).T)
-            
+            self.TeNe['PJ_ANN']['Te'] = np.ones_like(Hep) * np.nan
+            self.ANN.set_test(np.array((PJ_HI[mask], log_den[mask], Hep[mask])).T)            
             self.ANN.predict()
-            pred = np.zeros_like(log_den) * np.nan
-            pred[mask] = self.ANN.pred
-            self.TeNe['PJ_ANN']['Te'] = 10**pred
+            self.TeNe['PJ_ANN']['Te'][mask] = 10**self.ANN.pred
         self.log_.message('Done', calling='Pipeline.add_T_PJ_ML')
         
             
-    def set_abunds(self, IP_cut = 17, label=None, tem_HI=None):
+    def set_abunds(self, IP_cut = 17, label=None, tem_HI=None, exclude_elem=[]):
         
         Hbeta = self.obs.getIntens()['H1r_4861A']
         
         
         for line in self.obs.getSortedLines():
             if label is None or line.label == label: 
-                if line.atom not in self.atom_dic:
-                    if line.atom[-1] == 'r':
-                        atom = pn.RecAtom(line.elem, line.spec, case='A')
-                        IP = pn.utils.physics.IP[atom.elem][atom.spec-1]
-                    else:
-                        atom = pn.Atom(line.elem, line.spec)
-                        if atom.spec-2 < 0:
-                            IP = 0.
+                if line.elem not in exclude_elem:
+                    if line.atom not in self.atom_dic:
+                        if line.atom[-1] == 'r':
+                            atom = pn.RecAtom(line.elem, line.spec, case='A')
+                            IP = pn.utils.physics.IP[atom.elem][atom.spec-1]
                         else:
-                            IP = pn.utils.physics.IP[atom.elem][atom.spec-2]
-                    self.atom_dic[line.atom] = (atom, IP)
-                else:
-                    atom, IP = self.atom_dic[line.atom]
-                
-                if IP < IP_cut:
-                    Te = self.TeNe['N2S2']['Te']
-                    Ne = self.TeNe['N2S2']['Ne']
-                else:
-                    Te = self.TeNe['S3S2']['Te']
-                    Ne = self.TeNe['S3S2']['Ne']
-                if line.is_valid:
-                    self.abund_dic[line.label] = atom.getIonAbundance(line.corrIntens/Hbeta, Te, Ne, 
-                                                                      to_eval=line.to_eval, Hbeta=1.,
-                                                                      tem_HI=tem_HI)
-                else:
-                    self.abund_dic[line.label] = None
-                self.log_.message('Abund from {} done.'.format(line.label), calling='PipeLine.set_abunds')
+                            atom = pn.Atom(line.elem, line.spec)
+                            if atom.spec-2 < 0:
+                                IP = 0.
+                            else:
+                                IP = pn.utils.physics.IP[atom.elem][atom.spec-2]
+                        self.atom_dic[line.atom] = (atom, IP)
+                    else:
+                        atom, IP = self.atom_dic[line.atom]
+                    
+                    if IP < IP_cut:
+                        Te = self.TeNe['N2S2']['Te']
+                        Ne = self.TeNe['N2S2']['Ne']
+                    else:
+                        Te = self.TeNe['S3S2']['Te']
+                        Ne = self.TeNe['S3S2']['Ne']
+                    if line.is_valid:
+                        self.abund_dic[line.label] = atom.getIonAbundance(line.corrIntens/Hbeta, Te, Ne, 
+                                                                          to_eval=line.to_eval, Hbeta=1.,
+                                                                          tem_HI=tem_HI)
+                    else:
+                        self.abund_dic[line.label] = None
+                    self.log_.message('Abund from {} done.'.format(line.label), calling='PipeLine.set_abunds')
+
+    def print_TeNe(self, tex_filename):
+        
+        with open(tex_filename, 'w') as f:
+            for k in self.TeNe:
+                Te = self.obs.reshape(self.TeNe[k]['Te'])[0,0,:]
+                try:
+                    Ne = self.obs.reshape(self.TeNe[k]['Ne'])[0,0,:]
+                except:
+                    Ne = np.ones_like(Te)*np.nan
+                print2('{:10s} - Te: {:5.0f} +/- {:4.0f} K, Ne: {:4.0f} +/- {:4.0f}'.format(k, Te[0], np.nanstd(Te), Ne[0], np.nanstd(Ne)),f)
+        
 
     def print_ionic(self, tex_filename):
         
@@ -687,8 +718,7 @@ class PipeLine(object):
                                            np.nansum(PL.get_image(label='H1r_4861A', type_='orig')[~maskHb][maskinf]))
                         """
                     to_print = '{:15s} & {:5.2f} $\pm$ {:4.2f} \\\\'.format(tit, ab_int, std_int)
-                    print(to_print)
-                    f.write(to_print + '\n')
+                    print2(to_print,f)
         
     def correc_NII(self, tem, den=1e3):
         
@@ -948,8 +978,7 @@ class PipeLine(object):
                 f.write('   {}/H        &                    &      \\\\ \n'.format(elem))
                 ab_ML = 12 + np.log10(self.elem_abun_ML[elem])
                 to_print = '{:5.2f} +/- {:.2f} & ML this work       & \\\\'.format(ab_ML[0], np.nanstd(ab_ML))
-                print(to_print)
-                f.write(to_print + '\n')
+                print2(to_print, f)
                 icfs = self.icf.getAvailableICFs()[elem]
                 for k in icfs:
                     if isinstance(self.elem_abun[k], np.ndarray) and self.icf.all_icfs[k]['type'] in ('PNe', 'All'):
@@ -964,18 +993,20 @@ class PipeLine(object):
                                                                                           np.nanstd(ab),
                                                                                           k,
                                                                                           rule)
-                                print(to_print)
-                                f.write(to_print + '\n')
-                    
+                                print2(to_print, f)                    
     
 #%% run pipeline and all
 
 def run_pipeline(obj_name, Te_corr, random_seed=None,
-                 Cutout2D_position=(80,80),
+                 Cutout2D_position=None,#(80,80),
                  Cutout2D_size=(10,10)):
     
     if Te_corr < 1:
         Te_corr = None
+    if Cutout2D_position is None:
+        C2D_str = ''
+    else:
+        C2D_str = '_C2D'
     data_dir = Path(os.environ['MUSE_DATA']) / Path('{}/maps'.format(obj_name))
 
     PL = PipeLine(data_dir = data_dir,
@@ -999,9 +1030,13 @@ def run_pipeline(obj_name, Te_corr, random_seed=None,
     print('Data shape:', PL.obs.data_shape)
     print('Number of lines , valid ones: ', PL.obs.n_lines,PL.obs.n_valid_lines)
     
-    PL.obs.def_EBV()
-    PL.red_cor_obs(EBV_min = 0., plot_=False)#, label1="H1r_6561.0", label2="H1r_4860.0")    
-
+    if obj_name == 'M142':
+        PL.red_cor_obs(EBV_min = 0., plot_=False, 
+                       label1=("H1r_6563A", "H1r_9229A", "H1r_8750A"),
+                       r_theo=(2.86, 0.0254, 0.0106))
+    else:
+        PL.red_cor_obs(EBV_min = 0., plot_=False)
+        
     PL.correc_NII(Te_corr)
     PL.correc_OII(Te_corr, rec_label='O2r_4649.13A')    
     
@@ -1024,14 +1059,15 @@ def run_pipeline(obj_name, Te_corr, random_seed=None,
     
     PL.add_T_He()
     
-    PL.set_abunds()    
+    PL.set_abunds()#exclude_elem=('C', 'N', 'O', 'S', 'Cl', 'Ar'))
     
     PL.add_T_PJ()
     PL.add_T_PJ_ML()
     
-    PL.save_TeNe('{}/PipelineResults/{}_{}_C2D_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr))
-    PL.save_abunds('{}/PipelineResults/{}_{}_C2D_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr))
+    PL.save_TeNe('{}/PipelineResults/{}_{}{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
+    PL.save_abunds('{}/PipelineResults/{}_{}{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
     
+    return PL
         
 def run_all():
 
@@ -1041,4 +1077,5 @@ def run_all():
 
 
 if __name__ == "__main__":
-    run_pipeline(sys.argv[1], int(sys.argv[2]), random_seed=42)
+    if len(sys.argv) > 1:
+        run_pipeline(sys.argv[1], int(sys.argv[2]), random_seed=42)
