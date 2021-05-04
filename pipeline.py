@@ -1007,7 +1007,8 @@ class PipeLine(object):
 
 def run_pipeline(obj_name, Te_corr, random_seed=42,
                  Cutout2D_position=(80,80),
-                 Cutout2D_size=(10,10)):
+                 Cutout2D_size=(10,10),
+                 read_TeNe=False):
     
     try:
         Te_corr = int(Te_corr)
@@ -1020,6 +1021,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         C2D_str = ''
     else:
         C2D_str = '_C2D'
+        
     data_dir = Path(os.environ['MUSE_DATA']) / Path('{}/maps'.format(obj_name))
 
     PL = PipeLine(data_dir = data_dir,
@@ -1053,27 +1055,36 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     PL.correc_NII(Te_corr)
     PL.correc_OII(Te_corr, rec_label='O2r_4649.13A')    
     
-    PL.make_diags()    
+    if read_TeNe:
+        PL.read_TeNe('{}/PipelineResults/{}_{}{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
+        PL.read_abunds('{}/PipelineResults/{}_{}{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
         
-    pn.log_.timer('Starting', quiet=True)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        PL.add_gCTD('N2S2', '[NII] 5755/6548', '[SII] 6731/6716')
-        PL.add_gCTD('N2S2_84', '[NII] 5755/6584', '[SII] 6731/6716')
-        PL.add_gCTD('S3Cl3', '[SIII] 6312/9069', '[ClIII] 5538/5518')
-        PL.add_gCTD('S3S2', '[SIII] 6312/9069', '[SII] 6731/6716')
-        PL.add_gCTD('S3Ar4', '[SIII] 6312/9069', '[ArIV] 4740/4711')
-    pn.log_.timer('ANN getCrossTemDen done')    
-    
-    PL.add_T_He()
-    
-    PL.set_abunds()#exclude_elem=('C', 'N', 'O', 'S', 'Cl', 'Ar'))
-    
-    PL.add_T_PJ()
-    PL.add_T_PJ_ML()
-    
-    PL.save_TeNe('{}/PipelineResults/{}_{}{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
-    PL.save_abunds('{}/PipelineResults/{}_{}{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
-    
+        PL.define_ICF_ML(N_X=5, tol=1, learning_rate=.1, n_estimators=500, max_depth=10)
+        PL.predict_ICF_ML()
+        PL.set_abunds_elem_PyNeb()
+        PL.set_abunds_elem_ML()  
+    else:
+        PL.make_diags()    
+            
+        pn.log_.timer('Starting', quiet=True)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            PL.add_gCTD('N2S2', '[NII] 5755/6548', '[SII] 6731/6716')
+            PL.add_gCTD('N2S2_84', '[NII] 5755/6584', '[SII] 6731/6716')
+            PL.add_gCTD('S3Cl3', '[SIII] 6312/9069', '[ClIII] 5538/5518')
+            PL.add_gCTD('S3S2', '[SIII] 6312/9069', '[SII] 6731/6716')
+            PL.add_gCTD('S3Ar4', '[SIII] 6312/9069', '[ArIV] 4740/4711')
+        pn.log_.timer('ANN getCrossTemDen done')    
+        
+        PL.add_T_He()
+        
+        PL.set_abunds()#exclude_elem=('C', 'N', 'O', 'S', 'Cl', 'Ar'))
+        
+        PL.add_T_PJ()
+        PL.add_T_PJ_ML()
+        
+        PL.save_TeNe('{}/PipelineResults/{}_{}{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
+        PL.save_abunds('{}/PipelineResults/{}_{}{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
+        
     return PL
         
 def run_all():
