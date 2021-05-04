@@ -417,12 +417,16 @@ class PipeLine(object):
                             calling='PipeLine.red_cor_obs')
             self.obs.extinction.E_BV[mask] = 0.
         
-        
-        
         self.obs.correctData()
         if plot_:
             self.plot(data=self.obs.extinction.cHbeta, **kwargs)
 
+    def set_mask_Hb(self, cut=0.005):
+        
+        Hb = self.get_image(label='H1r_4861A', type_='orig', returnObs=True)
+        
+        self.mask_Hb = np.where(Hb > (np.nanmax(Hb) * cut), True, False)
+        
     def get_mask_SN(self, label, SN_cut):
         """
         Return a mask True where 1./error[label] < SN_cut
@@ -460,7 +464,9 @@ class PipeLine(object):
                 label_cut = label
             this_image[self.get_mask_SN(label_cut, SN_cut)] = np.nan
         if mask is not None:
-            this_image[mask] = np.nan
+            if mask == 'Hb':
+                mask = self.mask_Hb
+            this_image[~mask] = np.nan
         if use_log:
             with np.errstate(divide='ignore', invalid='ignore'):
                 this_image = np.log10(this_image)
@@ -1003,8 +1009,13 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
                  Cutout2D_position=(80,80),
                  Cutout2D_size=(10,10)):
     
-    if Te_corr < 1:
-        Te_corr = None
+    try:
+        Te_corr = int(Te_corr)
+        if Te_corr < 1:
+            Te_corr = None        
+    except:
+        pass
+        
     if Cutout2D_position is None:
         C2D_str = ''
     else:
@@ -1074,6 +1085,4 @@ def run_all():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        if sys.argv[2] is None:
-            sys.argv[2] = 0
-        run_pipeline(sys.argv[1], int(sys.argv[2]), random_seed=42)
+        run_pipeline(sys.argv[1], sys.argv[2], random_seed=42)
