@@ -301,7 +301,6 @@ class PipeLine(object):
         self.TeNe = {}
         self.NII_corrected = False
         self.OII_corrected = False
-        self.atom_dic  = {}
         self.abund_dic =  {}
         self.cmap = cmap
         self.RM_filename = 'ICFs_{}'.format(self.obj_name)
@@ -349,8 +348,9 @@ class PipeLine(object):
         err_int_dic = self.obs_int.getError(returnObs=True)
         for line in self.obs.getSortedLines():
             line.obsIntens *= self.flux_normalisation
-            mask_err = np.abs(line.obsError - self.err_default) < clean_error
-            line.obsIntens[mask_err] = np.nan
+            if clean_error is not None:
+                mask_err = np.abs(line.obsError - self.err_default) < clean_error
+                line.obsIntens[mask_err] = np.nan
             try:
                 line.obsIntens[0] = obs_int_dic[line.label][0]
                 line.obsError[0] = err_int_dic[line.label][0]
@@ -587,7 +587,7 @@ class PipeLine(object):
     def add_T_PJ(self, den=1e3, Hep=0.095, Hepp = 0.005):
     
         cont = pn.Continuum()
-        tab_tem = np.linspace(1000, 30000, 100)
+        tab_tem = np.linspace(500, 30000, 100)
         tab_den = np.ones_like(tab_tem) * den
         tab_Hep = np.ones_like(tab_tem) * Hep
         tab_Hepp = np.ones_like(tab_tem) * Hepp
@@ -662,23 +662,25 @@ class PipeLine(object):
         
         Hbeta = self.obs.getIntens()['H1r_4861A']
         
-        
+        atom_dic = {}
         for line in self.obs.getSortedLines():
             if label is None or line.label == label: 
                 if line.elem not in exclude_elem:
-                    if line.atom not in self.atom_dic:
+                    if line.atom not in atom_dic:
                         if line.atom[-1] == 'r':
+                            rec_line = True
                             atom = pn.RecAtom(line.elem, line.spec, case='A')
                             IP = pn.utils.physics.IP[atom.elem][atom.spec-1]
                         else:
+                            rec_line = False
                             atom = pn.Atom(line.elem, line.spec)
                             if atom.spec-2 < 0:
                                 IP = 0.
                             else:
                                 IP = pn.utils.physics.IP[atom.elem][atom.spec-2]
-                        self.atom_dic[line.atom] = (atom, IP)
+                        atom_dic[line.atom] = (atom, IP, rec_line)
                     else:
-                        atom, IP = self.atom_dic[line.atom]
+                        atom, IP, rec_line = atom_dic[line.atom]
                     
                     if IP < IP_cut:
                         Te = self.TeNe['N2S2']['Te']
@@ -1006,7 +1008,7 @@ class PipeLine(object):
 #%% run pipeline and all
 
 def run_pipeline(obj_name, Te_corr, random_seed=42,
-                 Cutout2D_position=(80,80),
+                 Cutout2D_position=None,
                  Cutout2D_size=(10,10),
                  read_TeNe=False):
     
@@ -1027,11 +1029,12 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     PL = PipeLine(data_dir = data_dir,
                   obj_name = obj_name, 
                   error_str='error', err_default=0.05,
+                  flux_normalisation=1e-20,
                   random_seed=random_seed,
                   Cutout2D_position=Cutout2D_position,
                   Cutout2D_size=Cutout2D_size)
 
-    PL.log_.level=3
+    PL.set_mask_Hb()
     
     PL.obs.addSum(('O1r_7771A', 'O1r_7773A', 'O1r_7775A'), 'O1r_7773+')
     
@@ -1077,10 +1080,12 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         
         PL.add_T_He()
         
-        PL.set_abunds()#exclude_elem=('C', 'N', 'O', 'S', 'Cl', 'Ar'))
+        PL.set_abunds(exclude_elem=('H', 'C', 'N', 'O', 'S', 'Cl', 'Ar'))
         
         PL.add_T_PJ()
         PL.add_T_PJ_ML()
+
+        PL.set_abunds(exclude_elem=('H', ))
         
         PL.save_TeNe('{}/PipelineResults/{}_{}{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
         PL.save_abunds('{}/PipelineResults/{}_{}{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
@@ -1089,7 +1094,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         
 def run_all():
 
-    for obj_name in ('M142', ): #'HF22','NGC6778','M142', 
+    for obj_name in ('M142', 'HF22','NGC6778'): #'HF22','NGC6778','M142', 
         for Te_corr in (None, 3000, 8000):
             run_pipeline(obj_name, Te_corr, random_seed=42)
 
