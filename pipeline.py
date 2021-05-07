@@ -25,6 +25,7 @@ try:
 except:
     AI4NEB_INSTALLED = False
 
+pn.atomicData.setDataFile('he_i_rec_S96_caseB.hdf5')
 
 def print2(to_print, f):
     print(to_print)
@@ -658,7 +659,8 @@ class PipeLine(object):
         self.log_.message('Done', calling='Pipeline.add_T_PJ_ML')
         
             
-    def set_abunds(self, IP_cut = 17, label=None, tem_HI=None, exclude_elem=[]):
+    def set_abunds(self, IP_cut = 17, label=None, tem_HI=None, exclude_elem=('H',),
+                   Te_rec = None):
         
         Hbeta = self.obs.getIntens()['H1r_4861A']
         
@@ -688,7 +690,9 @@ class PipeLine(object):
                     else:
                         Te = self.TeNe['S3S2']['Te']
                         Ne = self.TeNe['S3S2']['Ne']
-                    if line.is_valid:
+                    if Te_rec is not None and rec_line:
+                        Te = Te_rec * np.ones_like(Ne)
+                    if line.is_valid:                            
                         self.abund_dic[line.label] = atom.getIonAbundance(line.corrIntens/Hbeta, Te, Ne, 
                                                                           to_eval=line.to_eval, Hbeta=1.,
                                                                           tem_HI=tem_HI)
@@ -712,7 +716,7 @@ class PipeLine(object):
         
         with open(tex_filename, 'w') as f:
             for line in self.obs.getSortedLines(crit='mass'):
-                if line.is_valid:
+                if line.is_valid and line.elem != 'H':
                     tit = get_label_str(line.label)
                     with np.errstate(divide='ignore', invalid='ignore'):
                         ab_3D = self.obs.reshape(self.abund_dic[line.label])
@@ -1008,9 +1012,9 @@ class PipeLine(object):
 #%% run pipeline and all
 
 def run_pipeline(obj_name, Te_corr, random_seed=42,
-                 Cutout2D_position=None,
+                 Cutout2D_position=(80,80),
                  Cutout2D_size=(10,10),
-                 read_TeNe=False):
+                 read_TeNe=False, Receipt=1):
     
     try:
         Te_corr = int(Te_corr)
@@ -1024,6 +1028,13 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     else:
         C2D_str = '_C2D'
         
+    if Receipt == 1:
+        Te_rec = Te_corr
+        R_str='R1'
+    else:
+        Te_rec = None
+        R_str=''    
+    
     data_dir = Path(os.environ['MUSE_DATA']) / Path('{}/maps'.format(obj_name))
 
     PL = PipeLine(data_dir = data_dir,
@@ -1033,7 +1044,8 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
                   random_seed=random_seed,
                   Cutout2D_position=Cutout2D_position,
                   Cutout2D_size=Cutout2D_size)
-
+    PL.fic_name = '{}_{}{}{}'.format(obj_name, Te_corr, C2D_str, R_str) 
+    
     PL.set_mask_Hb()
     
     PL.obs.addSum(('O1r_7771A', 'O1r_7773A', 'O1r_7775A'), 'O1r_7773+')
@@ -1050,8 +1062,8 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     
     if obj_name == 'M142':
         PL.red_cor_obs(EBV_min = 0., plot_=False, 
-                       label1=("H1r_6563A", "H1r_9229A", "H1r_8750A"),
-                       r_theo=(2.86, 0.0254, 0.0106))
+                       label1=("H1r_6563A", "H1r_9229A", "H1r_8750A", 'H1r_8863A', 'H1r_9015A'),
+                       r_theo=(2.86, 0.0254, 0.0106, 0.0138, 0.0184))
     else:
         PL.red_cor_obs(EBV_min = 0., plot_=False)
         
@@ -1059,8 +1071,8 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     PL.correc_OII(Te_corr, rec_label='O2r_4649.13A')    
     
     if read_TeNe:
-        PL.read_TeNe('{}/PipelineResults/{}_{}{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
-        PL.read_abunds('{}/PipelineResults/{}_{}{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
+        PL.read_TeNe('{}/PipelineResults/{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
+        PL.read_abunds('{}/PipelineResults/{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
         
         PL.define_ICF_ML(N_X=5, tol=1, learning_rate=.1, n_estimators=500, max_depth=10)
         PL.predict_ICF_ML()
@@ -1084,21 +1096,22 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         
         PL.add_T_PJ()
         PL.add_T_PJ_ML()
-
-        PL.set_abunds(exclude_elem=('H', ))
+        PL.set_abunds(exclude_elem=('H', ), Te_rec=Te_rec)
         
-        PL.save_TeNe('{}/PipelineResults/{}_{}{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
-        PL.save_abunds('{}/PipelineResults/{}_{}{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], obj_name, Te_corr, C2D_str))
+        PL.save_TeNe('{}/PipelineResults/{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
+        PL.save_abunds('{}/PipelineResults/{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
         
     return PL
         
 def run_all():
 
-    for obj_name in ('M142', 'HF22','NGC6778'): #'HF22','NGC6778','M142', 
-        for Te_corr in (None, 3000, 8000):
-            run_pipeline(obj_name, Te_corr, random_seed=42)
+    for obj_name in ('NGC6778','M142', 'HF22'): #'HF22','NGC6778','M142', 
+        for Te_corr in (None, 1000, 4000, 8000):
+            run_pipeline(obj_name, Te_corr, random_seed=42, 
+                         Cutout2D_position=(80,80), read_TeNe=False, Receipt=1)
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        run_pipeline(sys.argv[1], sys.argv[2], random_seed=42)
+        run_pipeline(sys.argv[1], sys.argv[2], random_seed=42, Cutout2D_position=None, 
+                     Cutout2D_size=(10,10), read_TeNe=False, Receipt=None)
