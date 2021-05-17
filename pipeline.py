@@ -276,7 +276,7 @@ class PipeLine(object):
     def __init__(self, 
                  data_dir, 
                  obj_name,
-                 error_str='_error', 
+                 error_str='error', 
                  err_default=0.0,
                  flux_normalisation=1.0,
                  cmap='viridis', 
@@ -284,7 +284,32 @@ class PipeLine(object):
                  Cutout2D_position=None, 
                  Cutout2D_size=None):
         """
-
+        This class is aimed to deal with MUSE observations of PNe.
+        It reads the fits data files into a PyNeb.Observation object, performs 
+            needed transformation of the observed intensities (normalisation, filtering).
+        It generates fake observations based on the uncertainties (adding a systematic one)
+            to use Monte Carlo uncertainties transmission.
+        It computes the redenning correction and corrects the observations.
+        It computes the recombination contributions to [NII]5755 and [OII]7319,30 and 
+            remove them from the lines from the line intensities.
+        It computes the physical parameters (Te, Ne) using Machine Learning  in
+            the PyNeb.Diagnostics.getCrossTemDen method.
+        It computes the ionic abundances using smart rules.
+        It computes ICFs based on photoionization models obtained from 3MdB and a Machine
+        Learning method. It also computes the ICFs using the literature methods from the
+            PyNeb ICF class.
+        It includes plotting facilities that can take into account the WCS data from
+            the fits header.
+        It can save/restore the Te, Ne and ionic abundances into files.
+        
+        Keywords:
+            - data_dir: directory where to find the observations
+            - obj_name: name of the observed object. The data are supposed to be 
+                in files named {data_dir}/{obj_name}_MUSE_b_*.fits, * being the PyNeb code
+                of the emission line.
+            - error_str: transmitted to Observation. string to identify the error fits file. It will be named:
+                    {data_dir}/{obj_name}_MUSE_b_*_{error_str}.fits
+            - 
 
         Returns
         -------
@@ -375,7 +400,8 @@ class PipeLine(object):
         if label is not None:
             if isinstance(label, tuple):
                 with np.errstate(divide='ignore', invalid='ignore'):
-                    to_return = self.get_image(label=label[0], type_=type_) / self.get_image(label=label[1], type_=type_)
+                    to_return = (self.get_image(label=label[0], type_=type_ ,returnObs=returnObs) / 
+                                 self.get_image(label=label[1], type_=type_, returnObs=returnObs))
                 return to_return
             d2return = self.obs.getIntens(returnObs=returnObs)[label]
         else:
@@ -605,10 +631,10 @@ class PipeLine(object):
         self.TeNe['PJ']['Te'] = tem_inter(PJ_HI)
         self.log_.message('Done', calling='Pipeline.add_T_PJ')
                
-    def _make_grid_TPJ(self, tem_min=2000, tem_max=30000, 
+    def _make_grid_TPJ(self, tem_min=500, tem_max=30000, 
                        log_den_min=2, log_den_max=4, 
                        Hep_min = 0.0, Hep_max = 1.0, 
-                       HeoH=0.1):
+                       HeoH=0.12):
         
         N = 5000
         tab_tem = tem_min + np.random.rand(N) * (tem_max - tem_min)
@@ -645,7 +671,7 @@ class PipeLine(object):
             PJ_HI = (C_8100 - C_8400) /  HI
             PJ_HI[PJ_HI == 0] = np.nan
             log_den = np.log10(self.TeNe['N2S2']['Ne'])
-            Hep = 0.1 * (self.abund_dic['He1r_6678A'] / (self.abund_dic['He1r_6678A'] + self.abund_dic['He2r_4686A']))
+            Hep = 0.12 * (self.abund_dic['He1r_6678A'] / (self.abund_dic['He1r_6678A'] + self.abund_dic['He2r_4686A']))
         
         self._train_ML_PJ()
         mask = np.isfinite(PJ_HI) & np.isfinite(log_den) & np.isfinite(Hep)
@@ -671,7 +697,11 @@ class PipeLine(object):
                     if line.atom not in atom_dic:
                         if line.atom[-1] == 'r':
                             rec_line = True
-                            atom = pn.RecAtom(line.elem, line.spec, case='A')
+                            if line.atom in ('C2r', 'O1r'):
+                                case = 'A'
+                            else:
+                                case = 'B'
+                            atom = pn.RecAtom(line.elem, line.spec, case=case, extrapolate=True)
                             IP = pn.utils.physics.IP[atom.elem][atom.spec-1]
                         else:
                             rec_line = False
@@ -692,7 +722,7 @@ class PipeLine(object):
                         Ne = self.TeNe['S3S2']['Ne']
                     if Te_rec is not None and rec_line:
                         Te = Te_rec * np.ones_like(Ne)
-                    if line.is_valid:                            
+                    if line.is_valid:
                         self.abund_dic[line.label] = atom.getIonAbundance(line.corrIntens/Hbeta, Te, Ne, 
                                                                           to_eval=line.to_eval, Hbeta=1.,
                                                                           tem_HI=tem_HI)
@@ -747,9 +777,11 @@ class PipeLine(object):
         N2rP = pn.RecAtom('N', 2, case='B')
         pn.atomicData.setDataFile('n_ii_rec_FSL11.func')
         N2rF = pn.RecAtom('N', 2, case='B')
-        R_5755_5679 = N2rP.getEmissivity(tem, den, label='5755.', product=False) / N2rF.getEmissivity(tem, den, label='5679.56', product=False)
+        R_5755_5679 = (N2rP.getEmissivity(tem, den, label='5755.', product=False) / 
+                       N2rF.getEmissivity(tem, den, label='5679.56', product=False))
         with np.errstate(divide='ignore', invalid='ignore'):
-            I_5755_new = I_5755 - R_5755_5679*I_5679
+            self.I_5755R = R_5755_5679 * I_5679
+            I_5755_new = I_5755 - self.I_5755R
         for line in self.obs.lines:
             if line.label == 'N2_5755A':
                 line.corrIntens = I_5755_new
@@ -874,6 +906,7 @@ class PipeLine(object):
                    
             icf_c = (1./(df['Cp'][mask]))
             icf_n = (1./(df['Np'][mask]))
+            icf_no = df['Op'][mask]/df['Np'][mask]
             icf_o = (1./(df['Op'][mask]+df['Opp'][mask]))
             icf_s = (1./(df['Sp'][mask]+df['Spp'][mask]))
             icf_cl = (1./(df['Clpp'][mask]+df['Clppp'][mask]))
@@ -883,6 +916,8 @@ class PipeLine(object):
                 y_train = np.log10(np.array((icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
             elif self.N_y == 6:
                 y_train = np.log10(np.array((icf_c, icf_n, icf_o, icf_s,icf_cl, icf_ar)).T)
+            elif self.N_y == 7:
+                y_train = np.log10(np.array((icf_c, icf_n, icf_o, icf_s,icf_cl, icf_ar, icf_no)).T)
             RM = manage_RM(RM_type=RM_type,
                            X_train=X_train, 
                            y_train=y_train, 
@@ -941,6 +976,14 @@ class PipeLine(object):
                            'S+ + S++': ICFs[:,3],
                            'Cl2+ + Cl3+': ICFs[:,4],
                            'Ar2+ + Ar3+': ICFs[:,5]}
+        elif self.N_y == 7:
+            self.ICF_ML = {'C+': ICFs[:,0],
+                           'N+': ICFs[:,1],
+                           'O+ + O++': ICFs[:,2],
+                           'S+ + S++': ICFs[:,3],
+                           'Cl2+ + Cl3+': ICFs[:,4],
+                           'Ar2+ + Ar3+': ICFs[:,5],
+                           'N+/O+': ICFs[:,6]}
                            
     def plot_ML(self):
         self.RM.predict()
@@ -980,6 +1023,7 @@ class PipeLine(object):
         self.elem_abun_ML['He'] = self.atom_abun['He2'] + self.atom_abun['He3']
         self.elem_abun_ML['N'] = self.atom_abun['N2'] * self.ICF_ML['N+']
         self.elem_abun_ML['O'] =  (self.atom_abun['O2'] + self.atom_abun['O3']) * self.ICF_ML['O+ + O++']
+        self.elem_abun_ML['Nb'] = self.atom_abun['N2'] / self.atom_abun['O2'] * self.elem_abun_ML['O'] * self.ICF_ML['N+/O+']
         self.elem_abun_ML['S'] =  (self.atom_abun['S2'] + self.atom_abun['S3']) * self.ICF_ML['S+ + S++']
         self.elem_abun_ML['Cl'] = (self.atom_abun['Cl3'] + self.atom_abun['Cl4']) * self.ICF_ML['Cl2+ + Cl3+']
         self.elem_abun_ML['Ar'] = (self.atom_abun['Ar3'] + self.atom_abun['Ar4']) * self.ICF_ML['Ar2+ + Ar3+']
@@ -993,7 +1037,10 @@ class PipeLine(object):
                 ab_ML = 12 + np.log10(self.elem_abun_ML[elem])
                 to_print = '{:5.2f} +/- {:.2f} & ML this work       & \\\\'.format(ab_ML[0], np.nanstd(ab_ML))
                 print2(to_print, f)
-                icfs = self.icf.getAvailableICFs()[elem]
+                try:
+                    icfs = self.icf.getAvailableICFs()[elem]
+                except:
+                    icfs = []
                 for k in icfs:
                     if isinstance(self.elem_abun[k], np.ndarray) and self.icf.all_icfs[k]['type'] in ('PNe', 'All'):
                         if len(self.elem_abun[k]) > 1:
@@ -1014,7 +1061,8 @@ class PipeLine(object):
 def run_pipeline(obj_name, Te_corr, random_seed=42,
                  Cutout2D_position=(80,80),
                  Cutout2D_size=(10,10),
-                 read_TeNe=False, Receipt=1):
+                 read_TeNe=False, Receipt=1,
+                 N_X=5, N_y=7, retrainICFs=False):
     
     try:
         Te_corr = int(Te_corr)
@@ -1044,6 +1092,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
                   random_seed=random_seed,
                   Cutout2D_position=Cutout2D_position,
                   Cutout2D_size=Cutout2D_size)
+    PL.log_.level = 3
     PL.fic_name = '{}_{}{}{}'.format(obj_name, Te_corr, C2D_str, R_str) 
     
     PL.set_mask_Hb()
@@ -1074,7 +1123,8 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         PL.read_TeNe('{}/PipelineResults/{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
         PL.read_abunds('{}/PipelineResults/{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
         
-        PL.define_ICF_ML(N_X=5, tol=1, learning_rate=.1, n_estimators=500, max_depth=10)
+        PL.define_ICF_ML(N_X=N_X, N_y=N_y, retrain=retrainICFs,
+                         tol=1, learning_rate=.1, n_estimators=500, max_depth=10)
         PL.predict_ICF_ML()
         PL.set_abunds_elem_PyNeb()
         PL.set_abunds_elem_ML()  
@@ -1092,7 +1142,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         
         PL.add_T_He()
         
-        PL.set_abunds(exclude_elem=('H', 'C', 'N', 'O', 'S', 'Cl', 'Ar'))
+        PL.set_abunds(exclude_elem=('H', 'C', 'N', 'O', 'S', 'Cl', 'Ar'), Te_rec=Te_rec)
         
         PL.add_T_PJ()
         PL.add_T_PJ_ML()
@@ -1107,8 +1157,7 @@ def run_all():
 
     for obj_name in ('NGC6778','M142', 'HF22'): #'HF22','NGC6778','M142', 
         for Te_corr in (None, 1000, 4000, 8000):
-            run_pipeline(obj_name, Te_corr, random_seed=42, 
-                         Cutout2D_position=(80,80), read_TeNe=False, Receipt=1)
+            run_pipeline(obj_name, Te_corr, random_seed=42, Cutout2D_position=None, read_TeNe=False, Receipt=1)
 
 
 if __name__ == "__main__":
