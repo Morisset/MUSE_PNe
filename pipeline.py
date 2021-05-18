@@ -720,8 +720,13 @@ class PipeLine(object):
                     else:
                         Te = self.TeNe['S3S2']['Te']
                         Ne = self.TeNe['S3S2']['Ne']
-                    if Te_rec is not None and rec_line:
-                        Te = Te_rec * np.ones_like(Ne)
+                    if rec_line:      
+                        if Te_rec == 'He':
+                            Te = self.TeNe['He1']['Te']
+                        elif Te_rec == 'PJ_ANN':
+                            Te = self.TeNe['PJ_ANN']['Te']
+                        else:
+                            Te = Te_rec * np.ones_like(Ne)
                     if line.is_valid:
                         self.abund_dic[line.label] = atom.getIonAbundance(line.corrIntens/Hbeta, Te, Ne, 
                                                                           to_eval=line.to_eval, Hbeta=1.,
@@ -1079,6 +1084,12 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     if Receipt == 1:
         Te_rec = Te_corr
         R_str='R1'
+    elif Receipt == 2:
+        Te_rec = 'He'
+        R_str='R2'
+    elif Receipt == 3:
+        Te_rec = 'PJ_ANN'
+        R_str='R3'
     else:
         Te_rec = None
         R_str=''    
@@ -1142,7 +1153,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         
         PL.add_T_He()
         
-        PL.set_abunds(exclude_elem=('H', 'C', 'N', 'O', 'S', 'Cl', 'Ar'), Te_rec=Te_rec)
+        PL.set_abunds(exclude_elem=('H', 'C', 'N', 'O', 'S', 'Cl', 'Ar'), Te_rec=Te_corr)
         
         PL.add_T_PJ()
         PL.add_T_PJ_ML()
