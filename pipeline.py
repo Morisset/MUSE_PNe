@@ -231,6 +231,29 @@ def get_label_str(label):
     lab3 = lab3.split('.')[0]
     return '{} {}{}'.format(lab1, lab3, blend_str)
 
+def get_ion_str(label):
+    
+    
+    lab1 = label.split('_')[0]
+    if lab1[-1] == 'r':
+        lab1 = '{}'.format(lab1[0:-1])
+        forb = False
+    else:
+        forb = True
+        
+    lab1, lab2 = parseAtom(lab1)
+    lab2 = int(lab2)
+    if forb:
+        lab2 -= 1
+    if lab2 == 0:
+        charge = '0'
+    elif lab2 == 1:
+        charge = '+'
+    else:
+        charge = '{}+'.format(lab2)
+        
+    return '{}^{{{}}}'.format(lab1, charge)
+
 #%% Get from 3MdB
 
 def get_ICFs_3MdB():
