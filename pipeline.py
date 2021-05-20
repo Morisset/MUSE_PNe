@@ -254,6 +254,53 @@ def get_ion_str(label):
         
     return '{}^{{{}}}'.format(lab1, charge)
 
+#%% set Paschen apparent Te datafile
+
+def _get_T_pred(w, Ne, cont_warm, cont_cold, HI_warm, HI_cold, C, wl = np.array([8100,8400]), HI_label = '9_3'):
+    
+    cont_mix = (1-w) * np.tile(np.array([cont_warm]).T, (1, 100)) + w * cont_cold
+    HI_mix = (1-w) * np.tile(np.array([HI_warm]).T, (1, 100)) + w * HI_cold
+
+    BJ_mix = (cont_mix[0,:] - cont_mix[1,:]) / HI_mix
+    T_pred = C.T_BJ(BJ_HI = BJ_mix, den=Ne*np.ones_like(BJ_mix), He1_H=0.09*np.ones_like(BJ_mix), He2_H=0.01*np.ones_like(BJ_mix), 
+                    wl_bbj=wl[0], wl_abj=wl[1], HI_label=HI_label)
+    return T_pred
+
+def set_Paschen_T(N_T = 100, T_warm = 8000, Ne_warm = 1e3, Ne_cold = 1e4, N_w = 50):
+    
+    HI = pn.RecAtom('H',1)
+    C = pn.Continuum()    
+    
+    T_cold = np.linspace(500, 5000, N_T)
+    
+    wl = np.array([8100,8400])
+    HI_label = '9_3'
+    
+    cont_warm = C.get_continuum(T_warm, den=Ne_warm, He1_H=0.09, He2_H=0.01, wl=wl, HI_label=None)
+    HI_warm = HI.getEmissivity(T_warm, den=Ne_warm, label=HI_label)
+    
+    cont_cold = C.get_continuum(T_cold, den=Ne_cold*np.ones_like(T_cold), 
+                                He1_H=0.09*np.ones_like(T_cold), He2_H=0.01*np.ones_like(T_cold), 
+                                wl=wl, HI_label=None)
+    
+    HI_cold = HI.getEmissivity(T_cold, den=Ne_cold*np.ones_like(T_cold), label=HI_label, product=False)
+    
+    
+    ws = np.logspace(-2,0,N_w)
+    T_preds = np.ones((N_w, N_T))
+    T_preds.shape
+    
+    for i, w in enumerate(ws):
+        print(i)
+        T_preds[i,:] = _get_T_pred(w, Ne_warm, cont_warm, cont_cold, HI_warm, HI_cold, 
+                                   C, wl = np.array([8100,8400]), HI_label = '9_3')
+
+    T_cold_2D, ws_2D = np.meshgrid(T_cold, ws)
+
+    with open('T_Paschen.pickle', 'wb') as f:
+        pickle.dump({'T_cold_2D': T_cold_2D, 
+                     'ws_2D' : ws_2D, 
+                     'T_preds': T_preds}, f)    
 #%% Get from 3MdB
 
 def get_ICFs_3MdB():
