@@ -256,25 +256,15 @@ def get_ion_str(label):
 
 #%% set Paschen apparent Te datafile
 
-def _get_T_pred(w, Ne, cont_warm, cont_cold, HI_warm, HI_cold, C, wl = np.array([8100,8400]), HI_label = '9_3'):
-    
-    cont_mix = (1-w) * np.tile(np.array([cont_warm]).T, (1, 100)) + w * cont_cold
-    HI_mix = (1-w) * np.tile(np.array([HI_warm]).T, (1, 100)) + w * HI_cold
-
-    BJ_mix = (cont_mix[0,:] - cont_mix[1,:]) / HI_mix
-    T_pred = C.T_BJ(BJ_HI = BJ_mix, den=Ne*np.ones_like(BJ_mix), He1_H=0.09*np.ones_like(BJ_mix), He2_H=0.01*np.ones_like(BJ_mix), 
-                    wl_bbj=wl[0], wl_abj=wl[1], HI_label=HI_label)
-    return T_pred
 
 def set_Paschen_T(N_T = 100, T_warm = 8000, Ne_warm = 1e3, Ne_cold = 1e4, N_w = 50):
     
-    HI = pn.RecAtom('H',1)
-    C = pn.Continuum()    
-    
+    HI = pn.RecAtom('H',1)    
     T_cold = np.linspace(500, 5000, N_T)
-    
     wl = np.array([8100,8400])
     HI_label = '9_3'
+
+    C = pn.Continuum()    
     
     cont_warm = C.get_continuum(T_warm, den=Ne_warm, He1_H=0.09, He2_H=0.01, wl=wl, HI_label=None)
     HI_warm = HI.getEmissivity(T_warm, den=Ne_warm, label=HI_label)
@@ -292,12 +282,22 @@ def set_Paschen_T(N_T = 100, T_warm = 8000, Ne_warm = 1e3, Ne_cold = 1e4, N_w = 
     
     for i, w in enumerate(ws):
         print(i)
-        T_preds[i,:] = _get_T_pred(w, Ne_warm, cont_warm, cont_cold, HI_warm, HI_cold, 
-                                   C, wl = np.array([8100,8400]), HI_label = '9_3')
+        cont_mix = (1-w) * np.tile(np.array([cont_warm]).T, (1, 100)) + w * cont_cold
+        HI_mix = (1-w) * np.tile(np.array([HI_warm]).T, (1, 100)) + w * HI_cold
+    
+        BJ_mix = (cont_mix[0,:] - cont_mix[1,:]) / HI_mix
+        
+        T_preds[i,:] = C.T_BJ(BJ_HI = BJ_mix, 
+                              den=Ne_warm*np.ones_like(BJ_mix), 
+                              He1_H=0.09*np.ones_like(BJ_mix), 
+                              He2_H=0.01*np.ones_like(BJ_mix), 
+                              wl_bbj=wl[0], 
+                              wl_abj=wl[1], 
+                              HI_label=HI_label)
 
     T_cold_2D, ws_2D = np.meshgrid(T_cold, ws)
 
-    with open('T_Paschen.pickle', 'wb') as f:
+    with open('T_Paschen_{:.0f}.pickle'.format(T_warm), 'wb') as f:
         pickle.dump({'T_cold_2D': T_cold_2D, 
                      'ws_2D' : ws_2D, 
                      'T_preds': T_preds}, f)    
@@ -1091,14 +1091,11 @@ class PipeLine(object):
                 ax.set_title(r'STD = {:.2e}'.format(std))
             f.tight_layout()
     
-    def _load_T_Paschen(self, filename='T_Paschen.pickle'):
-        with open(filename, 'rb') as f:
-            self.T_P = pickle.load(f)        
-
-    def set_cold_weights(self, i_T_cold=7):
+    def set_cold_weights(self, i_T_cold=7, T_warm=8000):
         
-        if self.T_P is None:
-            self._load_T_Paschen()
+        self.T_warm=T_warm
+        with open('T_Paschen_{:.0f}.pickle'.format(T_warm), 'rb') as f:
+            self.T_P = pickle.load(f)        
         self.T_cold = self.T_P['T_cold_2D'][0,i_T_cold]
         self.log_.message('Determine cold region weights for T_cold={:.0f}'.format(self.T_cold), calling='set_cold_weights')
         self.p_coeffs = np.polyfit(np.log10(self.T_P['T_preds'][:,i_T_cold]), np.log10(self.T_P['ws_2D'][:,i_T_cold]), 1)
@@ -1245,7 +1242,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
             i_T_cold = 0
         else:
             i_T_cold = 7
-        PL.set_cold_weights(i_T_cold)
+        PL.set_cold_weights(i_T_cold, T_warm=8000)
     else:
         PL.make_diags()    
             
