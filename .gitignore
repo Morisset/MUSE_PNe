@@ -129,7 +129,6 @@ dmypy.json
 .pyre/
 
 *.ai4neb*
-*.pickle
 *.tgz
 *.pickle.gz
 *.csv.gz
