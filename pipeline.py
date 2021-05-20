@@ -353,6 +353,8 @@ class PipeLine(object):
         self.abund_dic =  {}
         self.cmap = cmap
         self.RM_filename = 'ICFs_{}'.format(self.obj_name)
+        self.T_P = None
+        self.cold_weights = None
         self.random_seed = random_seed
         np.random.seed(self.random_seed)
         self.ANN_inst_kwargs = {'RM_type' : 'SK_ANN', 
@@ -748,6 +750,8 @@ class PipeLine(object):
                             Te = self.TeNe['He1']['Te']
                         elif Te_rec == 'PJ_ANN':
                             Te = self.TeNe['PJ_ANN']['Te']
+                        elif Te_rec is None:
+                            Te_rec = Te
                         else:
                             Te = Te_rec * np.ones_like(Ne)
                     if line.is_valid:
@@ -773,6 +777,10 @@ class PipeLine(object):
     def print_ionic(self, tex_filename):
         
         with open(tex_filename, 'w') as f:
+            if self.cold_weights is not None:
+                print2('Correction to recomb abundances (T cold = {:.0f} K) : {:.2f} dex'.format(self.T_cold, 
+                                                                                             np.log10(1./self.cold_weights[0])), f)
+                print2('', f)
             for line in self.obs.getSortedLines(crit='mass'):
                 if line.is_valid and line.elem != 'H':
                     tit = get_label_str(line.label)
@@ -1027,6 +1035,21 @@ class PipeLine(object):
                 ax.set_title(r'STD = {:.2e}'.format(std))
             f.tight_layout()
     
+    def _load_T_Paschen(self, filename='T_Paschen.pickle'):
+        with open(filename, 'rb') as f:
+            self.T_P = pickle.load(f)        
+
+    def set_cold_weights(self, i_T_cold=7):
+        
+        if self.T_P is None:
+            self._load_T_Paschen()
+        self.T_cold = self.T_P['T_cold_2D'][0,i_T_cold]
+        self.log_.message('Determine cold region weights for T_cold={:.0f}'.format(self.T_cold), calling='set_cold_weights')
+        self.p_coeffs = np.polyfit(np.log10(self.T_P['T_preds'][:,i_T_cold]), np.log10(self.T_P['ws_2D'][:,i_T_cold]), 1)
+        poly = np.poly1d(self.p_coeffs)
+        self.cold_weights = 10**poly(np.log10(self.TeNe['PJ_ANN']['Te']))
+        
+
     def set_abunds_elem_PyNeb(self):
         get_ab = lambda label: self.obs.reshape(self.abund_dic[label])[0,0,:]
         
@@ -1161,7 +1184,12 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
                          tol=1, learning_rate=.1, n_estimators=500, max_depth=10)
         PL.predict_ICF_ML()
         PL.set_abunds_elem_PyNeb()
-        PL.set_abunds_elem_ML()  
+        PL.set_abunds_elem_ML()
+        if PL.obj_name == 'HF22':
+            i_T_cold = 0
+        else:
+            i_T_cold = 7
+        PL.set_cold_weights(i_T_cold)
     else:
         PL.make_diags()    
             
@@ -1176,7 +1204,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         
         PL.add_T_He()
         
-        PL.set_abunds(exclude_elem=('H', 'C', 'N', 'O', 'S', 'Cl', 'Ar'), Te_rec=Te_corr)
+        PL.set_abunds(exclude_elem=('H', 'C', 'N', 'O', 'S', 'Cl', 'Ar'), Te_rec=Te_rec)
         
         PL.add_T_PJ()
         PL.add_T_PJ_ML()
