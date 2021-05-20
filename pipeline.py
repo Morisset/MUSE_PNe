@@ -825,8 +825,17 @@ class PipeLine(object):
         
         with open(tex_filename, 'w') as f:
             if self.cold_weights is not None:
+                w = self.cold_weights[0]
+                Opp_col = self.obs.reshape(self.abund_dic['O3_4959A'])[0,0,0]
+                Opp_rec = (self.obs.reshape(self.abund_dic['O2r_4649.13A']+
+                                           self.abund_dic['O2r_4661.63A'])/2)[0,0,0]
+                
                 print2('Correction to recomb abundances (T cold = {:.0f} K) : {:.2f} dex'.format(self.T_cold, 
-                                                                                             np.log10(1./self.cold_weights[0])), f)
+                                                                                             np.log10(1./w)), f)
+                print2('Correction to coll   abundances (T cold = {:.0f} K) : {:.2f} dex'.format(self.T_cold, 
+                                                                                             np.log10(1./(1-w))), f)
+                print2('ACF(O++): {:.0f}'.format(Opp_rec/w/(Opp_col/(1-w))), f)
+                
                 print2('', f)
             for line in self.obs.getSortedLines(crit='mass'):
                 if line.is_valid and line.elem != 'H':
