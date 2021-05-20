@@ -132,8 +132,9 @@ dmypy.json
 *.tgz
 *.pickle.gz
 *.csv.gz
+*.csv
 
 figures/
 
 .DS_Store
-*.csv
+
