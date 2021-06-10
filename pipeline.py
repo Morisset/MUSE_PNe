@@ -258,7 +258,10 @@ def get_ion_str(label):
 
 
 def set_Paschen_T(N_T = 100, T_warm = 8000, Ne_warm = 1e3, Ne_cold = 1e4, N_w = 50):
-    
+    """
+    Compute a grid of apparent Paschen temperatures for a set of values for T_cold and cold region weights.
+    The resulting grids are stored in pickle files.
+    """
     HI = pn.RecAtom('H',1)    
     T_cold = np.linspace(500, 5000, N_T)
     wl = np.array([8100,8400])
@@ -305,6 +308,11 @@ def set_Paschen_T(N_T = 100, T_warm = 8000, Ne_warm = 1e3, Ne_cold = 1e4, N_w = 
 
 def get_ICFs_3MdB():
     
+    """
+    Download from 3MdB the PNe_2020 model results and save them into PN2020_3MdB_MUSE.csv.gz
+    The selected parameters are only ionic fracions.
+    """
+    
     host = os.environ['MdB_HOST']
     user = os.environ['MdB_USER']
     passwd = os.environ['MdB_PASSWD']
@@ -339,7 +347,20 @@ WHERE abion_17.ref = 'PNe_2020'
     res['Arpp_ppp'] = np.log10(res.Arpp / res.Arppp)
     
     res.to_csv('PN2020_3MdB_MUSE.csv.gz')
-    
+
+#%% OII_Diags
+def plot_OII_diag():
+    O2r = pn.RecAtom('O', 2)
+    O2_EG = pn.EmisGrid(atomObj=O2r, n_tem=100, n_den=100, 
+                        tem_min=100., tem_max=20000., den_min=10., 
+                        den_max=1.e8, restore_file=None)
+    f, ax = plt.subplots(figsize=(5, 4))
+    O2_EG.plotContours(to_eval = "(S('4649.13')+S('4650.84'))/S('4661.63')", ax=ax, 
+                       levels=np.asarray((0.52, 0.56, 0.60)), clabels=True)
+    ax.set_yscale('log')
+    ax.set_title('O II 4650+ / 4661')
+    f.savefig('OII_diags.pdf')
+
 #%% Pipeline
 class PipeLine(object):
     
@@ -354,23 +375,23 @@ class PipeLine(object):
                  Cutout2D_position=None, 
                  Cutout2D_size=None):
         """
-        This class is aimed to deal with MUSE observations of PNe.
-        It reads the fits data files into a PyNeb.Observation object, performs 
+        This class is aimed to deal with MUSE observations of PNe. It can:
+        - read the fits data files into a PyNeb.Observation object, performs 
             needed transformation of the observed intensities (normalisation, filtering).
-        It generates fake observations based on the uncertainties (adding a systematic one)
+        - generate fake observations based on the uncertainties (adding a systematic one)
             to use Monte Carlo uncertainties transmission.
-        It computes the redenning correction and corrects the observations.
-        It computes the recombination contributions to [NII]5755 and [OII]7319,30 and 
+        - compute the redenning correction and corrects the observations.
+        - compute the recombination contributions to [NII]5755 and [OII]7319,30 and 
             remove them from the lines from the line intensities.
-        It computes the physical parameters (Te, Ne) using Machine Learning  in
+        - compute the physical parameters (Te, Ne) using Machine Learning  in
             the PyNeb.Diagnostics.getCrossTemDen method.
-        It computes the ionic abundances using smart rules.
-        It computes ICFs based on photoionization models obtained from 3MdB and a Machine
-        Learning method. It also computes the ICFs using the literature methods from the
+        - compute the ionic abundances using smart rules.
+        - compute ICFs based on photoionization models obtained from 3MdB and a Machine
+            Learning method. It also computes the ICFs using the literature methods from the
             PyNeb ICF class.
-        It includes plotting facilities that can take into account the WCS data from
+        - include plotting facilities that can take into account the WCS data from
             the fits header.
-        It can save/restore the Te, Ne and ionic abundances into files.
+        - save/restore the Te, Ne and ionic abundances into files.
         
         Keywords:
             - data_dir: directory where to find the observations
@@ -379,7 +400,11 @@ class PipeLine(object):
                 of the emission line.
             - error_str: transmitted to Observation. string to identify the error fits file. It will be named:
                     {data_dir}/{obj_name}_MUSE_b_*_{error_str}.fits
-            - 
+            - err_default [0.0] value of the error to be added to the read error.
+            - flux_normalisation [1.0] factor to apply to any observed intensity
+            - cmap [viridis] color map used in the imshow
+            - random_seed [None] Random seed for the Monte Carlo and the Machine Learning methods
+            - Cutout2D_position, Cutout2D_size [None, None] Used to crop the fits images
 
         Returns
         -------
@@ -818,24 +843,49 @@ class PipeLine(object):
                     Ne = self.obs.reshape(self.TeNe[k]['Ne'])[0,0,:]
                 except:
                     Ne = np.ones_like(Te)*np.nan
-                print2('{:10s} - Te: {:5.0f} +/- {:4.0f} K, Ne: {:4.0f} +/- {:4.0f}'.format(k, Te[0], np.nanstd(Te), Ne[0], np.nanstd(Ne)),f)
+                print2('{:10s} - Te: {:5.0f} +/- {:4.0f} K, Ne: {:4.0f} +/- {:4.0f}'.format(k, Te[0], 
+                                                                                            np.nanstd(Te), 
+                                                                                            Ne[0], 
+                                                                                            np.nanstd(Ne)),
+                       f)
         
+
+    def print_ACFs(self, tex_filename):
+        
+        with open(tex_filename, 'w') as f:
+            if self.cold_weights is not None:
+                Opp_col = self.obs.reshape(self.abund_dic['O3_4959A'])[0,0,:]
+                Opp_rec = (self.obs.reshape(self.abund_dic['O2r_4649.13A']+
+                                           self.abund_dic['O2r_4661.63A'])/2)[0,0,:]
+                lADF = np.log10(Opp_rec/Opp_col)
+                print2('log ADF(O++): {:.2f} +/- {:.2f}'.format(lADF[0],np.nanstd(lADF)), 
+                       f)
+                
+                for i_T_cold in (0,7,12):
+                    for T_warm in (8000, 10000, 12000):
+                        self.set_cold_weights(i_T_cold=i_T_cold, T_warm=T_warm)
+                
+                
+                        w = self.obs.reshape(self.cold_weights)[0,0,:]
+                        lACF = np.log10(Opp_rec/w/(Opp_col/(1-w)))
+                        print2('T_warm: {:5.0f}, T_cold: {:4.0f}, log ACF(O++): {:.2f} +/- {:.2f}'.format(T_warm, self.T_cold,
+                                                                                                lACF[0],
+                                                                                                np.nanstd(lACF)), 
+                               f)
+                
 
     def print_ionic(self, tex_filename):
         
         with open(tex_filename, 'w') as f:
             if self.cold_weights is not None:
-                w = self.cold_weights[0]
-                Opp_col = self.obs.reshape(self.abund_dic['O3_4959A'])[0,0,0]
-                Opp_rec = (self.obs.reshape(self.abund_dic['O2r_4649.13A']+
-                                           self.abund_dic['O2r_4661.63A'])/2)[0,0,0]
-                
+                w = self.obs.reshape(self.cold_weights)[0,0,0]
                 print2('Correction to recomb abundances (T cold = {:.0f} K) : {:.2f} dex'.format(self.T_cold, 
-                                                                                             np.log10(1./w)), f)
+                                                                                             np.log10(1./w)), 
+                       f)
                 print2('Correction to coll   abundances (T cold = {:.0f} K) : {:.2f} dex'.format(self.T_cold, 
-                                                                                             np.log10(1./(1-w))), f)
-                print2('ACF(O++): {:.0f}'.format(Opp_rec/w/(Opp_col/(1-w))), f)
-                
+                                                                                             np.log10(1./(1-w))), 
+                       f)
+                                
                 print2('', f)
             for line in self.obs.getSortedLines(crit='mass'):
                 if line.is_valid and line.elem != 'H':
@@ -1097,10 +1147,10 @@ class PipeLine(object):
         with open('T_Paschen_{:.0f}.pickle'.format(T_warm), 'rb') as f:
             self.T_P = pickle.load(f)        
         self.T_cold = self.T_P['T_cold_2D'][0,i_T_cold]
-        self.log_.message('Determine cold region weights for T_cold={:.0f}'.format(self.T_cold), calling='set_cold_weights')
+        self.log_.debug('Determine cold region weights for T_cold={:.0f}'.format(self.T_cold), calling='set_cold_weights')
         self.p_coeffs = np.polyfit(np.log10(self.T_P['T_preds'][:,i_T_cold]), np.log10(self.T_P['ws_2D'][:,i_T_cold]), 1)
         poly = np.poly1d(self.p_coeffs)
-        self.cold_weights = 10**poly(np.log10(self.TeNe['PJ_ANN']['Te']))
+        self.cold_weights = 10**poly(np.log10(self.TeNe['PJ']['Te']))
         
 
     def set_abunds_elem_PyNeb(self):
@@ -1159,7 +1209,21 @@ class PipeLine(object):
                                                                                           k,
                                                                                           rule)
                                 print2(to_print, f)                    
-    
+
+
+    def print_lines(self, tex_filename):
+        Hb = self.obs.getLine(label='H1r_4861A')
+        with open(tex_filename, 'w') as f:
+            for l in self.obs.getSortedLines(crit='wave'):
+                I_obs = self.obs.reshape(l.obsIntens / Hb.obsIntens * 100)[0,0,:]
+                I_cor = self.obs.reshape(l.corrIntens / Hb.corrIntens * 100)[0,0,:]
+                mask = np.isfinite(I_obs)
+                e_obs = np.std(I_obs[mask])
+                mask = np.isfinite(I_cor)
+                e_cor = np.std(I_cor[mask])
+                to_print = '{:13s} & {:7.2f} $\pm$ {:5.2f} & {:7.2f} $\pm$ {:5.2f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)
+                print2(to_print, f) 
+                
 #%% run pipeline and all
 
 def run_pipeline(obj_name, Te_corr, random_seed=42,
