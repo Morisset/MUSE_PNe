@@ -1221,9 +1221,14 @@ class PipeLine(object):
                 e_obs = np.std(I_obs[mask])
                 mask = np.isfinite(I_cor)
                 e_cor = np.std(I_cor[mask])
-                to_print = '{:13s} & {:7.2f} $\pm$ {:5.2f} & {:7.2f} $\pm$ {:5.2f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)
+                if e_cor > 0.1:
+                    to_print = '{:13s} & {:8.1f} $\pm$ {:6.1f} & {:8.1f} $\pm$ {:6.1f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)
+                elif e_cor > 0.01:
+                    to_print = '{:13s} & {:8.2f} $\pm$ {:6.2f} & {:8.2f} $\pm$ {:6.2f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)                    
+                else:
+                    to_print = '{:13s} & {:8.3f} $\pm$ {:6.3f} & {:8.3f} $\pm$ {:6.3f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)                    
                 print2(to_print, f) 
-                
+
 #%% run pipeline and all
 
 def run_pipeline(obj_name, Te_corr, random_seed=42,
