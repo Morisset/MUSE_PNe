@@ -521,7 +521,7 @@ class PipeLine(object):
                     **kwargs):
         
         try:
-            test = r_theo[0]
+            _ = r_theo[0]
             r_theo_is_iterable = True
         except:
             r_theo_is_iterable = False
@@ -1216,12 +1216,11 @@ class PipeLine(object):
         with open(tex_filename, 'w') as f:
             for l in self.obs.getSortedLines(crit='wave'):
                 I_obs = self.obs.reshape(l.obsIntens / Hb.obsIntens * 100)[0,0,:]
+                e_obs = self.obs.reshape(l.obsError)[0,0,0] * I_obs[0]
                 I_cor = self.obs.reshape(l.corrIntens / Hb.corrIntens * 100)[0,0,:]
-                mask = np.isfinite(I_obs)
-                e_obs = np.std(I_obs[mask])
                 mask = np.isfinite(I_cor)
                 e_cor = np.std(I_cor[mask])
-                if e_cor > 0.1:
+                if e_obs > 0.1:
                     to_print = '{:13s} & {:8.1f} $\pm$ {:6.1f} & {:8.1f} $\pm$ {:6.1f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)
                 elif e_cor > 0.01:
                     to_print = '{:13s} & {:8.2f} $\pm$ {:6.2f} & {:8.2f} $\pm$ {:6.2f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)                    
