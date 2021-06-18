@@ -354,11 +354,20 @@ def plot_OII_diag():
     O2_EG = pn.EmisGrid(atomObj=O2r, n_tem=100, n_den=100, 
                         tem_min=100., tem_max=20000., den_min=10., 
                         den_max=1.e8, restore_file=None)
+    X = np.log10(O2_EG.den2D)
+    Y = O2_EG.tem2D
+    Z = np.log10((O2_EG.getGrid(label='4649.13') + O2_EG.getGrid(label='4650.84')) / O2_EG.getGrid(label='4661.63'))
+    levels = np.log10(np.asarray((1.86/0.47, 1.95/0.54, 2.7/0.82)))  #np.asarray((0.52, 0.56, 0.60)) # NGC6778, M142, HF22
+    ls = ('-', ':', '--')
     f, ax = plt.subplots(figsize=(5, 4))
-    O2_EG.plotContours(to_eval = "(S('4649.13')+S('4650.84'))/S('4661.63')", ax=ax, 
-                       levels=np.asarray((0.52, 0.56, 0.60)), clabels=True)
+    for i, l in enumerate(levels):
+        CS = ax.contour(X, Y, Z, levels=(l,), colors='k', linestyles=ls[i])
     ax.set_yscale('log')
+    #ax.clabel(CS, (('NGC6778', 'M142', 'HF22')), inline=True, fontsize=12, colors='black')
+    ax.set_xlabel(r'log(n$_{\rm e}$) [cm$^{-3}$]')
+    ax.set_ylabel(r'T$_{\rm e}$ [K]')
     ax.set_title('O II 4650+ / 4661')
+    f.tight_layout()
     f.savefig('OII_diags.pdf')
 
 #%% Pipeline
@@ -1167,9 +1176,16 @@ class PipeLine(object):
                           'Cl3' : np.mean((get_ab('Cl3_5518A'), get_ab('Cl3_5538A')), 0),
                           'Cl4' : get_ab('Cl4_7531A'),
                           'Ar3' : get_ab('Ar3_7136A'),
-                          'Ar4' : get_ab('Ar4_4740A')}
+                          'Ar4' : get_ab('Ar4_4740A'),
+                          'O2r' : get_ab('O1r_7773+'),
+                          'O3r' : get_ab('O2r_4649.13A'),
+                          'C3r' : get_ab('C2r_6462.0A')}
         self.icf = pn.ICF()
         self.elem_abun = self.icf.getElemAbundance(self.atom_abun)
+        self.elem_abun['Or'] = 12 + np.log10(self.atom_abun['O2r'] + self.atom_abun['O3r'])
+        wr = self.atom_abun['O3r'] / (self.atom_abun['O2r'] + self.atom_abun['O3r'])
+        icf_Cr = (0.05 + 2.21 * wr - 2.77 * wr**2 + 1.74*wr**3) / wr 
+        self.elem_abun['Cr'] = 12 + np.log10(self.atom_abun['C3r'] *  icf_Cr)
     
     def set_abunds_elem_ML(self):
         
@@ -1182,12 +1198,18 @@ class PipeLine(object):
         self.elem_abun_ML['Cl'] = (self.atom_abun['Cl3'] + self.atom_abun['Cl4']) * self.ICF_ML['Cl2+ + Cl3+']
         self.elem_abun_ML['Ar'] = (self.atom_abun['Ar3'] + self.atom_abun['Ar4']) * self.ICF_ML['Ar2+ + Ar3+']
         
+        
     def print_abunds_elem(self, tex_filename, print_rules=False):
         
         with open(tex_filename, 'w') as f:
+            print2('   C/H        &                    &      \\\\ \n', f)
+            to_print = '{:5.2f} +/- {:.2f} & RL this work       & \\\\'.format(self.elem_abun['Cr'][0], np.nanstd(self.elem_abun['Cr']))
+            print2(to_print, f)
             for elem in self.elem_abun_ML:
-                print('============= {} ============='.format(elem))
-                f.write('   {}/H        &                    &      \\\\ \n'.format(elem))
+                print2('   {}/H        &                    &      \\\\ \n'.format(elem), f)
+                if elem == 'O':
+                    to_print = '{:5.2f} +/- {:.2f} & RL this work       & \\\\'.format(self.elem_abun['Or'][0], np.nanstd(self.elem_abun['Or']))
+                    print2(to_print, f)
                 ab_ML = 12 + np.log10(self.elem_abun_ML[elem])
                 to_print = '{:5.2f} +/- {:.2f} & ML this work       & \\\\'.format(ab_ML[0], np.nanstd(ab_ML))
                 print2(to_print, f)
