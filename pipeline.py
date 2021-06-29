@@ -370,6 +370,24 @@ def plot_OII_diag():
     f.tight_layout()
     f.savefig('OII_diags.pdf')
 
+#%% Compact intens tables
+
+def merge_Intens(f1='NGC6778_4000R1_Intens.tex', 
+            f2='M142_4000R1_Intens.tex',
+            f3='HF22_4000R1_Intens.tex',
+            fo='All_4000R1_Intens.tex'):
+    
+    d1 = pd.read_csv('figures/{}'.format(f1), delimiter='&', names=('ID', 'I1', 'F1'))
+    d2 = pd.read_csv('figures/{}'.format(f2), delimiter='&', names=('ID', 'I2', 'F2'))
+    d3 = pd.read_csv('figures/{}'.format(f3), delimiter='&', names=('ID', 'I3', 'F3'))
+    for d in (d1, d2, d3):
+        d.set_index('ID', inplace=True)
+    do = d1
+    do['I2'] = d2['I2']
+    do['F2'] = d2['F2']
+    do['I3'] = d3['I3']
+    do['F3'] = d3['F3']
+    do.to_csv('figures/'+fo, sep='&', line_terminator='\\\\\n', quotechar=' ')
 #%% Pipeline
 class PipeLine(object):
     
@@ -467,6 +485,7 @@ class PipeLine(object):
                                   addErrDefault = True, 
                                   Cutout2D_position=Cutout2D_position, 
                                   Cutout2D_size=Cutout2D_size)
+        print(self.obs.getSortedLines())
         int_file = Path(self.data_dir) / Path('{}_int_line_fluxes.dat'.format(self.obj_name))
         self.obs_int = pn.Observation(int_file, fileFormat='lines_in_rows_err_cols',
                                       corrected = False, 
@@ -1139,7 +1158,7 @@ class PipeLine(object):
     def plot_ML(self):
         self.RM.predict()
         if self.RM.N_out > 1:
-            f, axes = plt.subplots(3, 2, figsize=(7, 11))
+            f, axes = plt.subplots(3, 3, figsize=(11, 11))
             for i in np.arange(self.RM.N_out):
                 ax = axes.ravel()[i]
                 y_test = self.RM.y_test_ori[self.RM.isfin,i]
@@ -1242,21 +1261,55 @@ class PipeLine(object):
                 I_cor = self.obs.reshape(l.corrIntens / Hb.corrIntens * 100)[0,0,:]
                 mask = np.isfinite(I_cor)
                 e_cor = np.std(I_cor[mask])
+                label = ' - '.join(l.label.split('_'))
                 if e_obs > 0.1:
-                    to_print = '{:13s} & {:8.1f} $\pm$ {:6.1f} & {:8.1f} $\pm$ {:6.1f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)
+                    to_print = '{:13s} & {:8.1f} $\pm$ {:6.1f} & {:8.1f} $\pm$ {:6.1f}'.format(label, I_obs[0], e_obs, I_cor[0], e_cor)
                 elif e_cor > 0.01:
-                    to_print = '{:13s} & {:8.2f} $\pm$ {:6.2f} & {:8.2f} $\pm$ {:6.2f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)                    
+                    to_print = '{:13s} & {:8.2f} $\pm$ {:6.2f} & {:8.2f} $\pm$ {:6.2f}'.format(label, I_obs[0], e_obs, I_cor[0], e_cor)                    
                 else:
-                    to_print = '{:13s} & {:8.3f} $\pm$ {:6.3f} & {:8.3f} $\pm$ {:6.3f}'.format(l.label, I_obs[0], e_obs, I_cor[0], e_cor)                    
+                    to_print = '{:13s} & {:8.3f} $\pm$ {:6.3f} & {:8.3f} $\pm$ {:6.3f}'.format(label, I_obs[0], e_obs, I_cor[0], e_cor)                    
                 print2(to_print, f) 
 
+    def print_feature_importances(self, tex_filename):
+        with open(tex_filename, 'w') as f:
+            print2('            He2+/He+ O2+/O+  S2+/S+ Cl3+/Cl2+ Ar3+/Ar2+' , f)
+            for RM, icf in zip(self.RM.RMs, ('C+', 'N+', 'O+ + O++', 'S+ + S++', 'Cl2+ + Cl3+', 'Ar2+ + Ar3+', 'N+/O+')):
+                print2('{:11s}'.format(icf) + '    '.join(['{:5.2f}'.format(fi) for fi in RM.feature_importances_]), f)
+                
+    def print_mass_ratios(self, tem_w=10000, tem_c=800, ne_w=3000, ne_c=3000):
+        pn.log_.level=2
+        pn.atomicData.setDataFile('o_ii_rec_SSB17-B-opt.hdf5')
+        O2rS = pn.RecAtom('O', 2, case='B')        
+        emis_O2r = (O2rS.getEmissivity(tem=tem_c, den=ne_c, label='4649.13', product=False) + 
+                    O2rS.getEmissivity(tem=tem_c, den=ne_c, label='4650.84', product=False))
+        O3 = pn.Atom('O', 3)
+        emis_O3 = O3.getEmissivity(tem=tem_w, den=ne_w, wave=4959, product=False)
+        mass_ratio_Opp = (emis_O3 / emis_O2r * 
+                      self.obs.reshape(self.obs.getLine(label='O2r_4649.13A').corrIntens)[0,0,:] /
+                      self.obs.reshape(self.obs.getLine(label='O3_4959A').corrIntens)[0,0,:] * 
+                      ne_w / ne_c )
+        O1r = pn.RecAtom('O', 1, case='A') 
+        emis_O1r = O1r.getEmissivity(tem=tem_c, den=ne_c, label='7773+', product=False)
+        O2 = pn.Atom('O', 2)
+        emis_O2 = (O2.getEmissivity(tem=tem_w, den=ne_w, wave=7331, product=False) +
+                   O2.getEmissivity(tem=tem_w, den=ne_w, wave=7329, product=False))
+        mass_ratio_Op = (emis_O2 / emis_O1r * 
+                      self.obs.reshape(self.obs.getLine(label='O1r_7773+').corrIntens)[0,0,:] /
+                      self.obs.reshape(self.obs.getLine(label='O2_7330A+').corrIntens)[0,0,:] * 
+                      ne_w / ne_c )
+        print('O+ cold/warm mass: {:.1f} +/- {:.1f}'.format(mass_ratio_Op[0], np.nanstd(mass_ratio_Op)))
+        print('O++ cold/warm mass: {:.1f} +/- {:.1f}'.format(mass_ratio_Opp[0], np.nanstd(mass_ratio_Opp)))
+
+
+        
 #%% run pipeline and all
 
 def run_pipeline(obj_name, Te_corr, random_seed=42,
                  Cutout2D_position=(80,80),
                  Cutout2D_size=(10,10),
                  read_TeNe=False, Receipt=1,
-                 N_X=5, N_y=7, retrainICFs=False):
+                 N_X=5, N_y=7, retrainICFs=False,
+                 Te_rec=1000):
     
     try:
         Te_corr = int(Te_corr)
@@ -1279,6 +1332,8 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     elif Receipt == 3:
         Te_rec = 'PJ_ANN'
         R_str='R3'
+    elif Receipt == 4:
+        R_str='R4'
     else:
         Te_rec = None
         R_str=''    
