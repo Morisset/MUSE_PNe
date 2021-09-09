@@ -34,6 +34,8 @@ def print2(to_print, f):
     f.write(to_print + '\n')
 
 
+DATA_DIR = './DATA/'
+
 #%% get_label_str
 
 def get_label_str(label):
@@ -1168,7 +1170,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         Te_rec = None
         R_str=''    
     
-    data_dir = Path(os.environ['MUSE_DATA']) / Path('{}/maps'.format(obj_name))
+    data_dir = Path(DATA_DIR) / Path('{}/'.format(obj_name))
 
     PL = PipeLine(data_dir = data_dir,
                   obj_name = obj_name, 
@@ -1205,8 +1207,8 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     PL.correc_OII(Te_corr, rec_label='O2r_4649.13A')    
     
     if read_TeNe:
-        PL.read_TeNe('{}/PipelineResults/{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
-        PL.read_abunds('{}/PipelineResults/{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
+        PL.read_TeNe('{}/PipelineResults/{}_TeNe.pickle.gz'.format(DATA_DIR, PL.fic_name))
+        PL.read_abunds('{}/PipelineResults/{}_abunds.pickle.gz'.format(DATA_DIR, PL.fic_name))
         
         PL.define_ICF_ML(N_X=N_X, N_y=N_y, retrain=retrainICFs,
                          tol=1, learning_rate=.1, n_estimators=500, max_depth=10)
@@ -1238,8 +1240,8 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
         PL.add_T_PJ_ML()
         PL.set_abunds(exclude_elem=('H', ), Te_rec=Te_rec)
         
-        PL.save_TeNe('{}/PipelineResults/{}_TeNe.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
-        PL.save_abunds('{}/PipelineResults/{}_abunds.pickle.gz'.format(os.environ['MUSE_DATA'], PL.fic_name))
+        PL.save_TeNe('{}/PipelineResults/{}_TeNe.pickle.gz'.format(DATA_DIR, PL.fic_name))
+        PL.save_abunds('{}/PipelineResults/{}_abunds.pickle.gz'.format(DATA_DIR, PL.fic_name))
         
     return PL
         
