@@ -4,6 +4,8 @@
 Created on Tue Apr  6 09:49:26 2021
 
 @author: christophemorisset
+
+This package is used to analyse the MUSE observations of 3 PNe
 """
 
 
@@ -451,7 +453,7 @@ class PipeLine(object):
         self.OII_corrected = False
         self.abund_dic =  {}
         self.cmap = cmap
-        self.RM_filename = 'ICFs_{}'.format(self.obj_name)
+        self.RM_filename = 'ai4neb/ICFs_{}'.format(self.obj_name)
         self.T_P = None
         self.cold_weights = None
         self.random_seed = random_seed
@@ -692,19 +694,23 @@ class PipeLine(object):
         
         
     def add_gCTD(self, label, diag1, diag2, use_ANN=True, limit_res=True, force=False, save=True, **kwargs):
-        
+        """
+        Add the values obtained from getCrossTemDen.
+        The first time it is run (or if force=True) the ANN is created, trained and stored. 
+        Next uses only call the already trained ANN.
+        """
         if not AI4NEB_INSTALLED and use_ANN:
             self.log_.error('ai4neb not installed')
         if force:
             ANN = None        
         else:
-            ANN = manage_RM(RM_filename=label)        
+            ANN = manage_RM(RM_filename='ai4neb/'+label)        
             if not ANN.model_read:
                 ANN = None
         Te, Ne = self.diags.getCrossTemDen(diag1, diag2, obs=self.obs, use_ANN=use_ANN, ANN=ANN,
                                            limit_res=limit_res, end_tem=30000, **kwargs)
         if use_ANN and ANN is None and save:
-            self.diags.ANN.save_RM(filename=label, save_train=True, save_test=True)
+            self.diags.ANN.save_RM(filename='ai4neb/'+label, save_train=True, save_test=True)
         self.TeNe[label] = {'Te': Te, 'Ne': Ne}
     
     def add_T_He(self):
@@ -1309,7 +1315,16 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
                  Cutout2D_size=(10,10),
                  read_TeNe=False, Receipt=1,
                  N_X=5, N_y=7, retrainICFs=False,
-                 Te_rec=1000):
+                 Te_rec=1000,
+                 N_MC=150):
+    """
+    This functions is called to instantiate the Pipeline class and to perform the
+    actions related to the analysis of the observations.
+    It can be use with read_TeNe=False: to compute all the Te, Ne, and Abund files associated to the Monte Carlo
+    fake observations (needs a few hours for the 3 PNe and all the options).
+    It is then called with read_TeNe=True.
+    
+    """
     
     try:
         Te_corr = int(Te_corr)
@@ -1360,7 +1375,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     
     PL.obs.getLine(label='O2r_4649.13A').to_eval = 'L(4649.13) + L(4650.84)'
     
-    PL.add_MC(150)
+    PL.add_MC(N_MC)
     print('Data shape:', PL.obs.data_shape)
     print('Number of lines , valid ones: ', PL.obs.n_lines,PL.obs.n_valid_lines)
     
@@ -1414,13 +1429,17 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
     return PL
         
 def run_all():
-
+    """
+    This function calls 3 x 4 times the run_pipeline to generate the pickle files containing Te, Ne and Abunds
+    for each one of the 150 MC fake observations.
+    """
     for obj_name in ('NGC6778','M142', 'HF22'): #'HF22','NGC6778','M142', 
         for Te_corr in (None, 1000, 4000, 8000):
-            run_pipeline(obj_name, Te_corr, random_seed=42, Cutout2D_position=None, read_TeNe=False, Receipt=1)
+            run_pipeline(obj_name, Te_corr, random_seed=42, Cutout2D_position=None, 
+                         read_TeNe=False, Receipt=1, N_MC=150)
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         run_pipeline(sys.argv[1], sys.argv[2], random_seed=42, Cutout2D_position=None, 
-                     Cutout2D_size=(10,10), read_TeNe=False, Receipt=None)
+                     Cutout2D_size=(10,10), read_TeNe=False, Receipt=None, N_MC=150)
