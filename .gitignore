@@ -128,7 +128,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-*.ai4neb*
 *.tgz
 *.pickle.gz
 *.csv.gz
