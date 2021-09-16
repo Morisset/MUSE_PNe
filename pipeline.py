@@ -141,6 +141,18 @@ def set_Paschen_T(N_T = 100, T_warm = 8000, Ne_warm = 1e3, Ne_cold = 1e4, N_w = 
         pickle.dump({'T_cold_2D': T_cold_2D, 
                      'ws_2D' : ws_2D, 
                      'T_preds': T_preds}, f)    
+
+def plot_Paschen_T(T_warm):
+    
+    with open('T_Paschen_{:.0f}.pickle'.format(T_warm), 'rb') as f:
+        T_P = pickle.load(f)    
+    f, ax = plt.subplots()
+    cs = ax.contour(T_P['T_cold_2D'], T_P['ws_2D'], T_P['T_preds'], 
+                    levels=(1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000))
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.clabel(cs)
+
 #%% Get from 3MdB
 
 def get_ICFs_3MdB():
@@ -384,7 +396,7 @@ class PipeLine(object):
             
         if EBV_min is not None:
             mask = self.obs.extinction.E_BV < EBV_min
-            pn.log_.message('number of spaxels with EBV < {} : {}'.format(EBV_min, mask.sum()),
+            pn.log_.message('number of spaxels with EBV < {} : {}/{}'.format(EBV_min, mask.sum(),len(mask)),
                             calling='PipeLine.red_cor_obs')
             self.obs.extinction.E_BV[mask] = 0.
         
@@ -1133,7 +1145,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
                  read_TeNe=False, Receipt=1,
                  N_X=5, N_y=7, retrainICFs=False,
                  Te_rec=1000,
-                 N_MC=150):
+                 N_MC=150, r_theo=2.86):
     """
     This functions is called to instantiate the Pipeline class and to perform the
     actions related to the analysis of the observations.
@@ -1201,7 +1213,7 @@ def run_pipeline(obj_name, Te_corr, random_seed=42,
                        label1=("H1r_6563A", "H1r_9229A", "H1r_8750A", 'H1r_8863A', 'H1r_9015A'),
                        r_theo=(2.86, 0.0254, 0.0106, 0.0138, 0.0184))
     else:
-        PL.red_cor_obs(EBV_min = 0., plot_=False)
+        PL.red_cor_obs(EBV_min = 0., plot_=False, r_theo=r_theo)
         
     PL.correc_NII(Te_corr)
     PL.correc_OII(Te_corr, rec_label='O2r_4649.13A')    
